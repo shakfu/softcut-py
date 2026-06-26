@@ -1,0 +1,63 @@
+[project]
+name = "softcut"
+version = "0.1.0"
+description = "Python bindings for softcut with nanobind"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Shakeeb Alireza", email = "shakfu@users.noreply.github.com" }
+]
+requires-python = ">=3.10"
+keywords = ["nanobind", "python", "extension"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: C++",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.21",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.9",
+    "twine>=6.2.0",
+]
+
+[build-system]
+requires = ["scikit-build-core>=0.8", "nanobind"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+wheel.packages = ["src/softcut"]
+cmake.args = []
+cmake.define = {}
+cmake.build-type = "Release"
+cmake.source-dir = "."
+# Force-include the native build inputs so the sdist always builds, regardless
+# of git tracking/ignore state. Exclude the unused softcut-lib JACK/OSC client.
+sdist.include = [
+    "CMakeLists.txt",
+    "src/softcut/_core.cpp",
+    "thirdparty/softcut-lib/softcut-lib/include/**",
+    "thirdparty/softcut-lib/softcut-lib/src/**",
+    "thirdparty/softcut-lib/LICENSE.txt",
+    "thirdparty/miniaudio/miniaudio.h",
+    "thirdparty/miniaudio/miniaudio.c",
+    "thirdparty/miniaudio/LICENSE",
+]
+sdist.exclude = [
+    "thirdparty/softcut-lib/clients/**",
+]
+wheel.exclude = [
+    "*.cpp",
+]
