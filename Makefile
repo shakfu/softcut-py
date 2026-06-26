@@ -4,7 +4,7 @@
 # This Makefile wraps common build commands for convenience.
 # The actual build is handled by scikit-build-core via pyproject.toml
 
-.PHONY: all sync build rebuild test lint format typecheck qa clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs release help
+.PHONY: all sync build rebuild test lint format typecheck qa demos demo-looper clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs release help
 
 # Default target
 all: build
@@ -38,6 +38,19 @@ typecheck:
 
 # Run a full quality assurance check
 qa: test lint typecheck format
+
+# Play the offline demos in sequence, live to the speakers (renders to build/out/
+# too). Covers every NN_*.py demo except 06, the interactive mic looper.
+demos:
+	@for d in demos/[0-9][0-9]_*.py; do \
+		case $$d in demos/06_*) continue;; esac; \
+		echo ">>> $$d"; \
+		uv run python $$d --play || exit $$?; \
+	done
+
+# Run the interactive realtime microphone looper (needs a mic + speakers)
+demo-looper:
+	@uv run python demos/06_live_looper.py
 
 # Build wheel
 wheel:
@@ -112,6 +125,8 @@ help:
 	@echo "  format       - Format with ruff"
 	@echo "  typecheck    - Type check with mypy"
 	@echo "  qa           - Run full quality assurance (test, lint, typecheck, format)"
+	@echo "  demos        - Play the offline demos in sequence (live to speakers)"
+	@echo "  demo-looper  - Run the interactive realtime mic looper (demo 06)"
 	@echo "  wheel        - Build wheel distribution"
 	@echo "  sdist        - Build source distribution"
 	@echo "  dist         - Build both wheel and sdist"

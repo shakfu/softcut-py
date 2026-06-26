@@ -336,6 +336,62 @@ def test_render_feeds_input_to_recording_voice():
     assert np.any(buf != 0.0)
 
 
+def _record_pass(v, eng, sr, signal):
+    """Record one full loop of `signal` into voice `v`; return the buffer."""
+    v.cut_to(0.0)
+    eng.render(np.asarray(signal, dtype=np.float32))
+    return np.asarray(v.buffer)
+
+
+def test_pre_level_zero_replaces_content():
+    """pre_level=0 erases existing buffer content (destructive replace)."""
+    sr = 48000
+    eng = Engine(voices=1, sample_rate=sr, mode="playback")
+    v = eng[0]
+    v.buffer = np.zeros(65536, dtype=np.float32)
+    loop = 65536 / sr
+    v.configure(loop_region=(0, loop), rate=1.0, rec_level=1.0, fade_time=0.001)
+    v.rec = v.play = True
+
+    first = np.full(65536, 0.5, dtype=np.float32)
+    v.pre_level = 0.0
+    _record_pass(v, eng, sr, first)
+    energy_after_first = np.abs(v.buffer).sum()
+    assert energy_after_first > 0.0
+
+    # replace with silence at pre_level=0 -> buffer is wiped
+    v.pre_level = 0.0
+    _record_pass(v, eng, sr, np.zeros(65536, dtype=np.float32))
+    # most of the loop should now be near zero (allow fade-region residue)
+    mid = np.asarray(v.buffer)[8000:60000]
+    assert np.abs(mid).max() < 0.05 * np.abs(first).max()
+
+
+def test_pre_level_feedback_decays():
+    """pre_level<1 with silent input multiplies content down each pass."""
+    sr = 48000
+    eng = Engine(voices=1, sample_rate=sr, mode="playback")
+    v = eng[0]
+    v.buffer = 0.6 * np.ones(65536, dtype=np.float32)
+    loop = 65536 / sr
+    v.configure(loop_region=(0, loop), rate=1.0, rec_level=1.0, fade_time=0.001)
+    v.rec = v.play = True
+    v.pre_level = 0.5  # halve each pass
+
+    def loop_rms():
+        return float(
+            np.sqrt((np.asarray(v.buffer)[8000:60000].astype(float) ** 2).mean())
+        )
+
+    levels = [loop_rms()]
+    for _ in range(3):
+        _record_pass(v, eng, sr, np.zeros(65536, dtype=np.float32))
+        levels.append(loop_rms())
+    # strictly decreasing toward silence
+    assert all(levels[i + 1] < levels[i] for i in range(len(levels) - 1))
+    assert levels[-1] < 0.3 * levels[0]
+
+
 def test_engine_sync():
     eng = Engine(voices=2, sample_rate=SR, mode="playback")
     eng.allocate(seconds=2.0)

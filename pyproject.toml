@@ -57,6 +57,8 @@ sdist.include = [
 ]
 sdist.exclude = [
     "thirdparty/softcut-lib/clients/**",
+    "tests/data/**",  # large demo audio fixtures; not needed to build/test the package
+    "build/**",
 ]
 wheel.exclude = [
     "*.cpp",
