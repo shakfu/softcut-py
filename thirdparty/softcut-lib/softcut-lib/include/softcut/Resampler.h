@@ -37,7 +37,20 @@ namespace softcut {
 #else
                 ,inBufIdx_(0)
 #endif
-        {}
+        {
+            // Zero the interpolation history/output buffers. reset() is never
+            // called by the host, and processFrame() interpolates over the last
+            // four input frames; without this the first poke() reads
+            // uninitialized slots and writes denormal/NaN garbage into the
+            // recording buffer.
+#ifdef RESAMPLER_INTERPOLATE_LINEAR
+            x_ = 0.f;
+            x_1_ = 0.f;
+#else
+            for (sample_t &i : inBuf_) { i = 0.f; }
+#endif
+            for (sample_t &i : outBuf_) { i = 0.f; }
+        }
 
         int processFrame(sample_t x){
             pushInput(x);

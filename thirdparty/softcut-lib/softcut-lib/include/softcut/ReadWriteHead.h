@@ -71,24 +71,29 @@ namespace softcut {
     private:
         SubHead head[2];
 
-        sample_t *buf;      // audio buffer (allocated elsewhere)
-        float sr;           // sample rate
-        phase_t start;      // start/end points
-        phase_t end;
-        phase_t queuedCrossfade;
-        bool queuedCrossfadeFlag;
-        float fadeTime;     // fade time in seconds
-        float fadeInc;      // linear fade increment per sample
+        // Default initializers mirror the state init() establishes, so the head
+        // is well-defined even if a setter or processing call runs before the
+        // host calls init()/setSampleRate()/setBuffer(). buf, sr, loopFlag, pre
+        // and rec in particular are not touched by init() and otherwise rely on
+        // the host calling every setter first.
+        sample_t *buf = nullptr;      // audio buffer (allocated elsewhere)
+        float sr = 48000.f;           // sample rate
+        phase_t start = 0;            // start/end points
+        phase_t end = 0;
+        phase_t queuedCrossfade = 0;
+        bool queuedCrossfadeFlag = false;
+        float fadeTime = 0.1f;        // fade time in seconds
+        float fadeInc = 0.f;          // linear fade increment per sample
 
-        int active;         // current active play head index (0 or 1)
-        bool loopFlag;      // set to loop, unset for 1-shot
-        float pre;      // pre-record level
-        float rec;      // record level
-        bool recOnceFlag; // set to record one full loop
-        bool recOnceDone; // triggers done to tell voice to unset rec flag
-        int recOnceHead; // keeps track of which subhead is writing
+        int active = 0;               // current active play head index (0 or 1)
+        bool loopFlag = false;        // set to loop, unset for 1-shot
+        float pre = 0.f;      // pre-record level
+        float rec = 0.f;      // record level
+        bool recOnceFlag = false; // set to record one full loop
+        bool recOnceDone = false; // triggers done to tell voice to unset rec flag
+        int recOnceHead = -1; // keeps track of which subhead is writing
 
-        rate_t rate;    // current rate
+        rate_t rate = 1.0;    // current rate
         TestBuffers testBuf;
     };
 }
