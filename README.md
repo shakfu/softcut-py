@@ -2,26 +2,15 @@
 
 ![CI](https://github.com/shakfu/softcut-py/actions/workflows/ci.yml/badge.svg)
 
-Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the
-per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via
-[miniaudio](https://github.com/mackron/miniaudio). Built with
-[nanobind](https://github.com/wjakob/nanobind).
+Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via [miniaudio](https://github.com/mackron/miniaudio). Built with [nanobind](https://github.com/wjakob/nanobind).
 
 This is not a port of the norns Lua API; it exposes softcut as Python objects.
 
 ## Concepts
 
-- **`Voice`** wraps one `softcut::Voice`: a crossfading read/write head over an
-  audio buffer, with rate, loop points, record/play, fades, and pre/post
-  state-variable filters. Parameters are plain attributes; the buffer is a numpy
-  `float32` array **you** own (softcut-lib never allocates buffer memory). Buffer
-  length must be a power of two — use `softcut.next_power_of_two` or
-  `Engine.allocate`, which rounds up for you. The same array can be shared by
-  several voices.
-- **`Engine`** is the multi-voice host: it owns a set of voices and a miniaudio
-  device, and runs them either live (realtime mic/speaker I/O on a background
-  audio thread) or offline via `Engine.render`. It is a context manager and a
-  sequence of voices.
+- **`Voice`** wraps one `softcut::Voice`: a crossfading read/write head over an audio buffer, with rate, loop points, record/play, fades, and pre/post state-variable filters. Parameters are plain attributes; the buffer is a numpy `float32` array **you** own (softcut-lib never allocates buffer memory). Buffer length must be a power of two — use `softcut.next_power_of_two` or `Engine.allocate`, which rounds up for you. The same array can be shared by several voices.
+
+- **`Engine`** is the multi-voice host: it owns a set of voices and a miniaudio device, and runs them either live (realtime mic/speaker I/O on a background audio thread) or offline via `Engine.render`. It is a context manager and a sequence of voices.
 
 ## Live looping
 
@@ -43,15 +32,11 @@ with softcut.Engine(voices=2) as eng:          # opens the audio device
 # device closed automatically
 ```
 
-`eng.start()` returns immediately and audio runs on a background thread, so the
-REPL stays live — set a parameter and you hear the change on the next block.
-`record()` is the non-blocking context-manager gesture; `record_for(seconds)`
-blocks the calling thread for a fixed capture.
+`eng.start()` returns immediately and audio runs on a background thread, so the REPL stays live — set a parameter and you hear the change on the next block. `record()` is the non-blocking context-manager gesture; `record_for(seconds)` blocks the calling thread for a fixed capture.
 
 ## Offline rendering
 
-No device; process a mono numpy block through the voices and get the mixed
-stereo output back. This is the deterministic path used by the tests:
+No device; process a mono numpy block through the voices and get the mixed stereo output back. This is the deterministic path used by the tests:
 
 ```python
 import numpy as np, softcut
@@ -66,15 +51,11 @@ v.cut_to(0)
 out = eng.render(np.random.randn(48000).astype(np.float32))   # (48000, 2) float32
 ```
 
-Load/save audio with whatever you like (e.g. `soundfile`) and assign the array
-to `voice.buffer`.
+Load/save audio with whatever you like (e.g. `soundfile`) and assign the array to `voice.buffer`.
 
 ## Routing and devices
 
-Voices mix to stereo via each voice's `level` and `pan`. `Engine.feedback(src,
-dst, amount)` routes one voice's output into another's input (one block delayed;
-`src == dst` is a self-feedback delay line), and each voice's `input_gain` scales
-the engine's external (mic) input into it:
+Voices mix to stereo via each voice's `level` and `pan`. `Engine.feedback(src, dst, amount)` routes one voice's output into another's input (one block delayed; `src == dst` is a self-feedback delay line), and each voice's `input_gain` scales the engine's external (mic) input into it:
 
 ```python
 eng.feedback(0, 1, 0.4)     # voice 0 -> voice 1 input
@@ -96,25 +77,14 @@ make test     # run the test suite
 make qa       # test + lint + typecheck + format
 ```
 
-Set `SOFTCUT_TEST_AUDIO=1` to additionally exercise a real audio device in the
-test suite. Use `make help` for more targets (wheel, sdist, clean, etc.).
+Set `SOFTCUT_TEST_AUDIO=1` to additionally exercise a real audio device in the test suite. Use `make help` for more targets (wheel, sdist, clean, etc.).
 
 ## Releasing
 
-CI runs QA and a Linux/macOS/Windows build smoke on every push and pull request.
-Pushing a `v*` tag builds wheels for CPython 3.10-3.14 across Linux
-(x86_64/aarch64), macOS (x86_64/arm64) and Windows with
-[cibuildwheel](https://cibuildwheel.pypa.io), plus the sdist, and publishes them
-to PyPI via trusted publishing. `make release` bumps the version and creates the
-tag; pushing it triggers the release. (TestPyPI is available via the workflow's
-manual `workflow_dispatch`.)
+CI runs QA and a Linux/macOS/Windows build smoke on every push and pull request. Pushing a `v*` tag builds wheels for CPython 3.10-3.14 across Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows with [cibuildwheel](https://cibuildwheel.pypa.io), plus the sdist, and publishes them to PyPI via trusted publishing. `make release` bumps the version and creates the tag; pushing it triggers the release. (TestPyPI is available via the workflow's manual `workflow_dispatch`.)
 
 ## Notes
 
-- Realtime parameter updates are safe: while the device is running, voice DSP
-  parameter changes from Python are enqueued and applied on the audio thread via
-  a lock-free queue rather than racing it. (The mix scalars `level`/`pan`/
-  `input_gain` and the feedback matrix are plain aligned writes.)
-- The vendored `softcut-lib` carries small host-portability fixes (uninitialized
-  members that relied on embedded zero-init static storage, and an oversized
-  debug buffer stubbed out); see the comments in `thirdparty/softcut-lib`.
+- Realtime parameter updates are safe: while the device is running, voice DSP parameter changes from Python are enqueued and applied on the audio thread via a lock-free queue rather than racing it. (The mix scalars `level`/`pan`/ `input_gain` and the feedback matrix are plain aligned writes.)
+
+- The vendored `softcut-lib` carries small host-portability fixes (uninitialized members that relied on embedded zero-init static storage, and an oversized debug buffer stubbed out); see the comments in `thirdparty/softcut-lib`.

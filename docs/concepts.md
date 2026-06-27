@@ -32,7 +32,7 @@ The same array can be **shared** between voices — assign it to several voices 
 
 When a voice has both `rec` and `play` on, each sample it writes is:
 
-```
+```text
 buffer = buffer * pre_level + input * rec_level
 ```
 
