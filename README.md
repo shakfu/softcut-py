@@ -4,7 +4,7 @@
 
 Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via [miniaudio](https://github.com/mackron/miniaudio). Built with [nanobind](https://github.com/wjakob/nanobind).
 
-This is not a port of the norns Lua API; it exposes softcut as Python objects.
+The primary API exposes softcut as idiomatic Python objects. An optional [norns-compatible layer](#norns-compatible-api) (`softcut.norns`) additionally mirrors the flat norns Lua `softcut` API for porting existing scripts.
 
 ## Concepts
 
@@ -68,6 +68,30 @@ Pick a specific device by index from `softcut.list_devices()`:
 softcut.list_devices()                      # [{'index':0,'name':...,'type':'playback',...}, ...]
 eng = softcut.Engine(output_device=1, input_device=0)
 ```
+
+## norns-compatible API
+
+For porting norns scripts (and the muscle memory that goes with them), `softcut.norns` mirrors the flat, 1-based, singleton norns [softcut Lua API](https://monome.org/docs/norns/api/modules/softcut.html): 6 voices indexed from 1 and 2 global mono buffers numbered 1/2. Import it under the name norns scripts expect and call the functions verbatim:
+
+```python
+from softcut import norns as softcut
+
+softcut.buffer_clear()
+softcut.buffer_read_mono("loop.wav", ch_dst=1)   # numpy + stdlib wave, no extra dep
+softcut.loop(1, 1)
+softcut.loop_start(1, 0.0)
+softcut.loop_end(1, 4.0)
+softcut.rate(1, 1.0)
+softcut.level(1, 0.8)
+softcut.play(1, 1)
+
+softcut.start()                                  # open the audio device
+```
+
+- **Attribute passthrough** — `rate`, `level`, `pan`, `play`/`rec`/`loop`, loop points, `position`, the pre/post filters, slews, phase, `buffer`, `voice_sync`, `level_cut_cut`, `reset`.
+- **Buffer/disk ops** — `buffer_read_*` / `buffer_write_*`, `buffer_copy_*`, `buffer_clear*`, in pure numpy plus the standard-library `wave` module (WAV only, no new dependency), with preserve/mix crossfade, edge `fade_time` and `reverse`. Operations write in place, so they are safe against the running audio thread; reads are non-resampling, matching norns.
+
+`softcut.render` / `softcut.start` / `softcut.stop` drive audio (norns runs its audio continuously; here you render offline or open the device explicitly). Phase polling and per-sample level/pan slews are not yet implemented; see [`docs/dev/norns-api.md`](docs/dev/norns-api.md) for the full mapping and status. `demos/12_norns_api.py` is a narrated walkthrough built entirely on this layer.
 
 ## Build and test
 

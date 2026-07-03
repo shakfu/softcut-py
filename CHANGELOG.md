@@ -6,7 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.1]
+
 ### Added
+
+- norns-compatible API layer (`softcut.norns`, import as `from softcut import norns as softcut`): the flat, 1-based, singleton norns `softcut` namespace (6 voices, 2 global mono buffers) over the object core. Implements Tier A (attribute passthrough: rate, level, pan, play/rec/loop, loop points, filters, slews, phase, `position`, `buffer`, `voice_sync`, `level_cut_cut`, `reset`) and Tier B (buffer/disk ops in numpy plus the stdlib `wave` module, no new dependency: `buffer_read_*`/`buffer_write_*`, `buffer_copy_*`, `buffer_clear*`, with preserve/mix crossfade, edge `fade_time` and `reverse`). Buffer ops write in place and never reallocate, so they are safe against a running audio thread; reads are non-resampling (file-rate), matching norns. Phase polling (Tier C) and the slew/routing gaps needing core changes (Tier D) are not included; see `docs/dev/norns-api.md`.
+
+- `softcut._wavio`: stdlib-`wave` WAV codec (`read_wav`, `read_wav_mono`, `write_wav`) shared by the norns layer and the demos; the demo `_util` helpers now delegate to it.
+
+- Demo `12_norns_api.py`: a narrated progression (forward loop, low-pass, octave-down, reverse, stereo, reversed buffer copy) driven exclusively through the norns API, each feature separated by a second of silence. Renders offline or performs live with `--play`.
 
 - Voice-to-voice feedback routing: `Engine.feedback(src, dst, amount)` mixes one voice's output into another's input (one block delayed; `src == dst` is a self-feedback delay line), plus a per-voice `input_gain` for the engine's external input.
 

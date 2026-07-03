@@ -37,7 +37,7 @@ from softcut._core import Voice, _Engine
 from softcut._core import list_devices as _list_devices
 
 __all__ = ["Voice", "Engine", "Softcut", "next_power_of_two", "list_devices"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def list_devices() -> list[dict]:
