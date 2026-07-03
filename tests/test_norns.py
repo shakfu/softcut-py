@@ -19,7 +19,9 @@ SR = 48000.0
 def sc():
     # Small power-of-two buffer keeps assertions cheap; playback mode never
     # touches an audio device.
-    return norns.NornsSoftcut(sample_rate=SR, voices=6, buffer_frames=4096, mode="playback")
+    return norns.NornsSoftcut(
+        sample_rate=SR, voices=6, buffer_frames=4096, mode="playback"
+    )
 
 
 def sec(frames: int) -> float:
@@ -256,7 +258,9 @@ def test_read_offsets_and_dur(sc, tmp_path):
     b1 = sc.buffers[1]
     b1[:] = 0.0
     # read 10 frames starting at source frame 500 into dest frame 20
-    sc.buffer_read_mono(tmp_path / "r.wav", start_src=sec(500), start_dst=sec(20), dur=sec(10))
+    sc.buffer_read_mono(
+        tmp_path / "r.wav", start_src=sec(500), start_dst=sec(20), dur=sec(10)
+    )
     assert np.allclose(b1[20:30], ramp[500:510], atol=1e-3)
     assert not b1[:20].any()  # nothing written before the dest offset
 

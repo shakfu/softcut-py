@@ -39,7 +39,7 @@ def sine_buffer(
 
 
 def test_version_and_exports():
-    assert softcut.__version__ == "0.1.0"
+    assert softcut.__version__ == "0.1.1"
     assert {"Voice", "Engine", "next_power_of_two"} <= set(softcut.__all__)
 
 
