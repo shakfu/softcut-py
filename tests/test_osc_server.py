@@ -145,8 +145,10 @@ def test_buffer_clear_region(server, client):
     assert drive(
         client,
         [("/softcut/buffer/clear_region", [0.0, 0.1])],
-        lambda: float(host.buffers[1][: n - 1].max()) == 0.0
-        and float(host.buffers[2][: n - 1].max()) == 0.0,
+        lambda: (
+            float(host.buffers[1][: n - 1].max()) == 0.0
+            and float(host.buffers[2][: n - 1].max()) == 0.0
+        ),
     )
     assert host.buffers[1][n + 10] == 1.0  # outside the cleared region
 

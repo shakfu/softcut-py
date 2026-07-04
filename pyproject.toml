@@ -1,6 +1,6 @@
 [project]
 name = "softcut-py"
-version = "0.1.1"
+version = "0.2.0"
 description = "Python bindings for softcut-lib (the norns softcut DSP engine) with nanobind"
 readme = "README.md"
 license = { text = "MIT" }
