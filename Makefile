@@ -4,7 +4,7 @@
 # This Makefile wraps common build commands for convenience.
 # The actual build is handled by scikit-build-core via pyproject.toml
 
-.PHONY: all sync build rebuild test lint format typecheck qa demos demo-looper clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
+.PHONY: all sync build rebuild build-tinyosc test lint format typecheck qa demos demo-looper clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
 
 # Default target
 all: build
@@ -15,10 +15,14 @@ sync:
 
 # Build/rebuild the extension after code changes
 build:
-	@uv sync --reinstall-package softcut
+	@uv sync --reinstall-package softcut-py
 
 # Alias for build
 rebuild: build
+
+# Build with the optional native OSC codec (vendored tinyosc) compiled in.
+build-tinyosc:
+	@SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" uv sync --reinstall-package softcut-py --no-cache
 
 # Run tests
 test:
@@ -107,16 +111,19 @@ release:
 	@echo "Current version: $$(grep '^version' pyproject.toml | head -1)"
 	@read -p "New version: " version; 	sed -i '' "s/^version = .*/version = \"$$version\"/" pyproject.toml; 	git add pyproject.toml; 	git commit -m "Bump version to $$version"; 	git tag -a "v$$version" -m "Release $$version"; 	echo "Tagged v$$version. Run 'git push && git push --tags' to publish."
 
-# Clean build artifacts
+# Clean build artifacts. The compiled extension lives in the uv-managed venv
+# (rebuilt by `make build`), so cleanup must prune .venv and .git: a bare
+# `find . -name "*.so" -delete` would wipe every dependency's .so (numpy, etc.)
+# inside .venv and break the environment.
 clean:
 	@rm -rf build/
 	@rm -rf dist/
 	@rm -rf *.egg-info/
 	@rm -rf src/*.egg-info/
 	@rm -rf .pytest_cache/
-	@find . -name "*.so" -delete
-	@find . -name "*.pyd" -delete
-	@find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find . \( -path ./.venv -o -path ./.git \) -prune -o -name "*.so" -type f -exec rm -f {} +
+	@find . \( -path ./.venv -o -path ./.git \) -prune -o -name "*.pyd" -type f -exec rm -f {} +
+	@find . \( -path ./.venv -o -path ./.git \) -prune -o -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Clean everything including CMake cache
 distclean: clean

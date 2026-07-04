@@ -93,6 +93,49 @@ softcut.start()                                  # open the audio device
 
 `softcut.render` / `softcut.start` / `softcut.stop` drive audio (norns runs its audio continuously; here you render offline or open the device explicitly). Phase polling and per-sample level/pan slews are not yet implemented; see [`docs/dev/norns-api.md`](docs/dev/norns-api.md) for the full mapping and status. `demos/12_norns_api.py` is a narrated walkthrough built entirely on this layer.
 
+## OSC server
+
+`softcut.osc` exposes softcut over the same OSC wire protocol as the reference [`softcut_jack_osc`](https://github.com/monome/softcut-lib) client, so existing norns/Lua scripts, SuperCollider, Max, or any OSC controller can drive softcut-py as a drop-in engine over the network. It is a thin dispatch layer over the norns host: each address maps to a host method, with the one translation that the wire protocol is 0-based (voices 0-5, buffers 0-1) while the host is 1-based.
+
+```python
+from softcut.osc import SoftcutOSC
+from softcut import norns
+
+host = norns.NornsSoftcut()
+host.start()                                   # open the audio device
+server = SoftcutOSC(host)                       # listen on UDP 9999
+server.serve_forever()                          # blocks until a /quit message
+```
+
+Or run it straight from the command line:
+
+```bash
+python -m softcut.osc                            # device + OSC server
+python -m softcut.osc --no-audio                 # offline: buffer ops only
+```
+
+Then drive it from any OSC client (voice/buffer indices 0-based):
+
+```
+/set/param/cut/rate      0 1.0        # voice 0 rate = 1.0
+/set/param/cut/loop_start 0 0.0
+/set/param/cut/loop_end  0 4.0
+/set/param/cut/loop_flag 0 1
+/set/level/cut           0 0.8
+/set/param/cut/play_flag 0 1
+/softcut/buffer/read_mono "loop.wav"  0.0 0.0 -1  0 0
+/poll/start/cut/phase                 # -> /poll/softcut/phase <voice> <phase>
+```
+
+The full namespace is mirrored: all `/set/param/cut/*` params, routing (`/set/level|pan/cut`, `cut_cut`, `in_cut`), the `/softcut/buffer/*` disk ops, `/softcut/reset`, and the phase poll. Defaults match the reference: listen on UDP 9999, reply (phase poll) to `127.0.0.1:57120`.
+
+**Two transports**, selected by `backend=` ("auto" by default):
+
+- **python-osc** — the default pure-Python transport. Install the optional extra: `pip install softcut-py[osc]`. The core package stays numpy-only.
+- **native** (**experimental**) — a dependency-free UDP transport built on the vendored [tinyosc](https://github.com/mhroth/tinyosc) codec. It is **not** compiled into the published wheels; opt in with a source build (`SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" pip install .` or `make build-tinyosc`; reported by `softcut._core.HAVE_TINYOSC`). Receiving and parsing run in C, but dispatch runs under the GIL because the DSP command queue is single-producer, so it is a dependency-free transport rather than a GIL-free fast path. It is IPv4-only and less battle-tested than python-osc; prefer python-osc unless you specifically need zero-dependency OSC.
+
+A few addresses are partial, mirroring the norns layer's gaps: `enabled` maps to play, `in_cut` uses the scalar per-voice input gain (there is no per-channel ADC matrix), and level/pan slew and the VU poll are accepted-and-ignored. See [`docs/guide/osc.md`](docs/guide/osc.md) for the complete address table.
+
 ## Build and test
 
 ```bash

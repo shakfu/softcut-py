@@ -26,6 +26,26 @@
 
 #include "miniaudio.h"
 
+// Native OSC codec, compiled in only when the CMake option SOFTCUT_ENABLE_TINYOSC
+// is set. The default build ships without it; the pure-Python option (python-osc)
+// covers OSC at runtime instead.
+#ifdef SOFTCUT_TINYOSC
+#include "tinyosc.h"
+#include <thread>
+#include <chrono>
+#include <cstring>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+#endif
+
 namespace nb = nanobind;
 using namespace nb::literals;
 
@@ -38,6 +58,13 @@ namespace {
 // control thread (Python, GIL held) pushes; the audio thread drains at each
 // block. Commands are tiny lambdas (a Voice* plus a scalar) that fit in
 // std::function's small-buffer storage, so push/pop/call never touch the heap.
+//
+// The native OSC receiver (SOFTCUT_TINYOSC) is not a second producer: it
+// dispatches under the GIL, so its queue pushes serialize with the Python
+// control thread on the GIL, and this stays single-producer. A GIL-free native
+// dispatch path would need a multi-producer queue -- see benchmarks/osc_dispatch.py
+// for why that path is not worth building (it is transport-bound, not
+// dispatch-bound).
 struct CommandQueue {
     static constexpr size_t CAP = 4096;  // power of two
     std::array<std::function<void()>, CAP> buf;
@@ -412,6 +439,202 @@ nb::list list_audio_devices() {
     return result;
 }
 
+#ifdef SOFTCUT_TINYOSC
+// --- Native OSC transport (UDP + vendored tinyosc), gated on the CMake option.
+//
+// The receiver owns a UDP socket and a background thread; each datagram is
+// parsed in C with tinyosc and handed up to a Python callback. Dispatch happens
+// under the GIL, on purpose: the DSP command queue is single-producer (the
+// Python control thread), so parameter writes must serialize with it via the
+// GIL rather than posting from a second thread. This makes the native path a
+// dependency-free transport (no python-osc), not a GIL-free fast path.
+
+#ifdef _WIN32
+using socket_t = SOCKET;
+static const socket_t kInvalidSocket = INVALID_SOCKET;
+static void close_socket(socket_t s) { closesocket(s); }
+static void ensure_sockets() {
+    static bool done = false;
+    if (!done) {
+        WSADATA w;
+        WSAStartup(MAKEWORD(2, 2), &w);
+        done = true;
+    }
+}
+static void set_recv_timeout_ms(socket_t s, int ms) {
+    DWORD tv = static_cast<DWORD>(ms);
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&tv),
+               sizeof(tv));
+}
+#else
+using socket_t = int;
+static const socket_t kInvalidSocket = -1;
+static void close_socket(socket_t s) { ::close(s); }
+static void ensure_sockets() {}
+static void set_recv_timeout_ms(socket_t s, int ms) {
+    struct timeval tv;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+#endif
+
+static void make_sockaddr(const std::string &host, int port, sockaddr_in &addr) {
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (host.empty() || host == "0.0.0.0" ||
+        inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    }
+}
+
+// Receives OSC over UDP and delivers each parsed message to a Python callback
+// as (address: str, args: list). Args cover the i/f/s/h/d/T/F type tags used by
+// the softcut protocol; an unknown tag stops parsing that message.
+class OscReceiver {
+public:
+    OscReceiver(const std::string &host, int port, nb::callable cb)
+        : callback_(std::move(cb)) {
+        ensure_sockets();
+        sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock_ == kInvalidSocket)
+            throw std::runtime_error("OSC receiver: socket() failed");
+        int one = 1;
+        setsockopt(sock_, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char *>(&one), sizeof(one));
+        sockaddr_in addr;
+        make_sockaddr(host, port, addr);
+        if (::bind(sock_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+            close_socket(sock_);
+            sock_ = kInvalidSocket;
+            throw std::runtime_error("OSC receiver: bind() failed on port " +
+                                     std::to_string(port));
+        }
+        set_recv_timeout_ms(sock_, 100);  // so the loop can poll running_
+        sockaddr_in bound;
+        socklen_t bl = sizeof(bound);
+        port_ = (getsockname(sock_, reinterpret_cast<sockaddr *>(&bound), &bl) == 0)
+                    ? ntohs(bound.sin_port)
+                    : port;
+    }
+
+    ~OscReceiver() {
+        stop();
+        if (sock_ != kInvalidSocket) close_socket(sock_);
+    }
+
+    int port() const { return port_; }
+
+    void start() {
+        if (running_.exchange(true)) return;
+        thread_ = std::thread([this] { run(); });
+    }
+
+    void stop() {
+        running_.store(false);
+        if (thread_.joinable()) {
+            // Release the GIL so the recv thread can acquire it to finish an
+            // in-flight callback, otherwise join() would deadlock.
+            nb::gil_scoped_release rel;
+            thread_.join();
+        }
+    }
+
+private:
+    void run() {
+        std::vector<char> buf(4096);
+        while (running_.load()) {
+            sockaddr_in from;
+            socklen_t fl = sizeof(from);
+            int n = static_cast<int>(::recvfrom(sock_, buf.data(),
+                static_cast<int>(buf.size()), 0,
+                reinterpret_cast<sockaddr *>(&from), &fl));
+            if (n <= 0) continue;  // timeout or error
+            if (tosc_isBundle(buf.data())) {
+                tosc_bundle b;
+                tosc_parseBundle(&b, buf.data(), n);
+                tosc_message m;
+                while (tosc_getNextMessage(&b, &m)) deliver(&m);
+            } else {
+                tosc_message m;
+                if (tosc_parseMessage(&m, buf.data(), n) == 0) deliver(&m);
+            }
+        }
+    }
+
+    void deliver(tosc_message *m) {
+        const char *address = tosc_getAddress(m);
+        const char *fmt = tosc_getFormat(m);
+        nb::gil_scoped_acquire gil;
+        nb::list args;
+        for (const char *t = fmt; *t; ++t) {
+            if (*t == 'i') args.append(tosc_getNextInt32(m));
+            else if (*t == 'f') args.append(tosc_getNextFloat(m));
+            else if (*t == 's') args.append(std::string(tosc_getNextString(m)));
+            else if (*t == 'h') args.append(static_cast<int64_t>(tosc_getNextInt64(m)));
+            else if (*t == 'd') args.append(tosc_getNextDouble(m));
+            else if (*t == 'T') args.append(true);
+            else if (*t == 'F') args.append(false);
+            else break;  // unknown tag: stop to avoid misaligned reads
+        }
+        try {
+            callback_(nb::str(address), args);
+        } catch (nb::python_error &e) {
+            e.restore();
+            PyErr_Clear();  // isolate a bad callback; keep receiving
+        } catch (...) {
+        }
+    }
+
+    nb::callable callback_;
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    socket_t sock_ = kInvalidSocket;
+    int port_ = 0;
+};
+
+// Minimal UDP sender for the softcut reply protocol. Only the outbound phase
+// message (`/poll/softcut/phase <int> <float>`) is emitted, so it supports the
+// empty and (int, float) signatures; other shapes raise.
+class OscSender {
+public:
+    OscSender(const std::string &host, int port) {
+        ensure_sockets();
+        sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock_ == kInvalidSocket)
+            throw std::runtime_error("OSC sender: socket() failed");
+        make_sockaddr(host, port, dest_);
+    }
+
+    ~OscSender() {
+        if (sock_ != kInvalidSocket) close_socket(sock_);
+    }
+
+    void send_message(const std::string &address, nb::list args) {
+        char buf[512];
+        uint32_t n;
+        size_t k = args.size();
+        if (k == 0) {
+            n = tosc_writeMessage(buf, sizeof(buf), address.c_str(), "");
+        } else if (k == 2) {
+            int i = nb::cast<int>(args[0]);
+            float f = nb::cast<float>(args[1]);
+            n = tosc_writeMessage(buf, sizeof(buf), address.c_str(), "if", i, f);
+        } else {
+            throw std::runtime_error(
+                "_OscSender supports [] or [int, float] (softcut reply protocol)");
+        }
+        ::sendto(sock_, buf, static_cast<int>(n), 0,
+                 reinterpret_cast<sockaddr *>(&dest_), sizeof(dest_));
+    }
+
+private:
+    socket_t sock_ = kInvalidSocket;
+    sockaddr_in dest_;
+};
+#endif  // SOFTCUT_TINYOSC
+
 }  // namespace
 
 // float property: mirror field (read immediately) + DSP setter routed through
@@ -572,4 +795,80 @@ NB_MODULE(_core, m) {
     m.def("list_devices", &list_audio_devices,
         "List the system audio devices as dicts with keys "
         "index/name/type/is_default.");
+
+    // Whether the native tinyosc OSC codec was compiled in (CMake option
+    // SOFTCUT_ENABLE_TINYOSC). Lets Python pick the native path or fall back to
+    // the pure-Python (python-osc) option.
+#ifdef SOFTCUT_TINYOSC
+    m.attr("HAVE_TINYOSC") = true;
+
+    // Vendored tinyosc smoke test: round-trip an OSC message through the wire
+    // codec (serialize then parse) entirely in C, returning the decoded args.
+    // Confirms tinyosc is compiled and linked into the extension; also a hook
+    // for the OSC-server work to build on. Returns (address, int, float, str).
+    m.def("_osc_selftest", []() {
+        char buf[64];
+        uint32_t n = tosc_writeMessage(buf, sizeof(buf), "/sc/test", "ifs",
+                                       42, 3.5f, "hi");
+        tosc_message msg;
+        if (tosc_parseMessage(&msg, buf, static_cast<int>(n)) != 0)
+            throw std::runtime_error("tinyosc parse failed");
+        const char *address = tosc_getAddress(&msg);
+        int32_t i = tosc_getNextInt32(&msg);
+        float f = tosc_getNextFloat(&msg);
+        const char *s = tosc_getNextString(&msg);
+        return nb::make_tuple(std::string(address), i, f, std::string(s));
+    }, "Round-trip an OSC message through the vendored tinyosc codec.");
+
+    nb::class_<OscReceiver>(m, "_OscReceiver",
+        "Native UDP OSC receiver (tinyosc). Delivers each message to a Python "
+        "callback as (address, args); dispatch runs under the GIL.")
+        .def(nb::init<const std::string &, int, nb::callable>(),
+            "host"_a, "port"_a, "callback"_a)
+        .def("start", &OscReceiver::start,
+            "Begin receiving on a background thread.")
+        .def("stop", &OscReceiver::stop,
+            "Stop receiving and join the thread.")
+        .def_prop_ro("port", &OscReceiver::port,
+            "The actual bound UDP port (resolves an ephemeral port 0).");
+
+    nb::class_<OscSender>(m, "_OscSender",
+        "Native UDP OSC sender (tinyosc) for the softcut reply protocol.")
+        .def(nb::init<const std::string &, int>(), "host"_a, "port"_a)
+        .def("send_message", &OscSender::send_message, "address"_a, "args"_a,
+            "Send an OSC message; supports [] or [int, float] arguments.");
+
+    // --- benchmark / prototype hooks (dev only) ---
+    // Cost of the proposed native fast path: parse + address match + post to
+    // the command queue, N times, entirely in C with the GIL released.
+    m.def("_bench_native_dispatch", [](Voice &v, int n) {
+        char buf[64];
+        uint32_t len = tosc_writeMessage(buf, sizeof(buf), "/set/param/cut/rate",
+                                         "if", 0, 1.0f);
+        double secs;
+        {
+            nb::gil_scoped_release rel;
+            auto t0 = std::chrono::steady_clock::now();
+            for (int k = 0; k < n; ++k) {
+                tosc_message msg;
+                if (tosc_parseMessage(&msg, buf, static_cast<int>(len)) != 0) continue;
+                const char *addr = tosc_getAddress(&msg);
+                int voice = tosc_getNextInt32(&msg);
+                float val = tosc_getNextFloat(&msg);
+                (void) voice;  // one voice in this microbench
+                if (std::strcmp(addr, "/set/param/cut/rate") == 0) {
+                    Voice *p = &v;
+                    v.rate_ = val;
+                    v.dsp_apply([p, val] { p->v.setRate(val); });
+                }
+            }
+            auto t1 = std::chrono::steady_clock::now();
+            secs = std::chrono::duration<double>(t1 - t0).count();
+        }
+        return secs;
+    }, "voice"_a, "n"_a,
+        "Benchmark N native OSC rate dispatches (GIL released); returns seconds.");
+#else
+    m.attr("HAVE_TINYOSC") = false;
+#endif
 }

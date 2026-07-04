@@ -24,6 +24,14 @@ dependencies = [
     "numpy>=1.21",
 ]
 
+[project.optional-dependencies]
+# Pure-Python OSC transport for softcut.osc. The core stays numpy-only; install
+# with `pip install softcut-py[osc]`. An optional native transport (built-in
+# tinyosc, CMake option SOFTCUT_ENABLE_TINYOSC) can replace this at runtime.
+osc = [
+    "python-osc>=1.8",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.19.1",
@@ -31,6 +39,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.14.9",
     "twine>=6.2.0",
+    "python-osc>=1.8",
 ]
 docs = [
     "mkdocs>=1.6",
@@ -58,6 +67,9 @@ sdist.include = [
     "thirdparty/miniaudio/miniaudio.h",
     "thirdparty/miniaudio/miniaudio.c",
     "thirdparty/miniaudio/LICENSE",
+    "thirdparty/tinyosc/tinyosc.h",
+    "thirdparty/tinyosc/tinyosc.c",
+    "thirdparty/tinyosc/LICENSE",
 ]
 sdist.exclude = [
     "thirdparty/softcut-lib/clients/**",

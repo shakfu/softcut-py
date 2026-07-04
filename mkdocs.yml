@@ -50,6 +50,7 @@ nav:
       - Routing & feedback: guide/routing.md
       - Devices: guide/devices.md
       - Realtime parameters: guide/realtime.md
+      - OSC server: guide/osc.md
   - Demos: demos.md
   - API reference: api.md
   - Changelog: changelog.md

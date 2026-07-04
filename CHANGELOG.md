@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- OSC server (`softcut.osc`) exposing softcut over the monome softcut wire
+  protocol, so norns/Lua scripts, SuperCollider, Max, or any OSC controller can
+  drive softcut-py as a drop-in engine. It is a thin dispatch layer over the
+  `softcut.norns` host: the full reference address namespace (`/set/param/cut/*`,
+  routing, `/softcut/buffer/*`, `/softcut/reset`) maps to host methods, with the
+  0-based wire protocol translated to the host's 1-based API. A background phase
+  poll (`/poll/start|stop/cut/phase`) reports quantized playhead position back as
+  `/poll/softcut/phase <voice> <phase>`. Run with `python -m softcut.osc`
+  (defaults: listen UDP 9999, reply 127.0.0.1:57120, matching the reference).
+  Partial/known gaps mirror the norns layer: `enabled` maps to play, `in_cut`
+  uses the scalar input gain (no per-channel ADC matrix), level/pan slew and the
+  VU poll are accepted-and-ignored.
+
+- Two OSC transports behind one dispatch table, selected by `backend=`
+  ("auto"/"python-osc"/"native"):
+  - `python-osc` as an optional extra (`pip install softcut-py[osc]`); the core
+    stays numpy-only. The default when the native transport is not built.
+  - An **experimental**, dependency-free `native` transport (UDP socket + the
+    vendored tinyosc codec, exposed as `_core._OscReceiver`/`_core._OscSender`),
+    compiled in with the CMake option `SOFTCUT_ENABLE_TINYOSC` and reported by
+    `softcut._core.HAVE_TINYOSC`. It is **not** enabled in the published wheels;
+    opt in with a source build. Receiving and parsing run in C; dispatch runs
+    under the GIL because the DSP command queue is single-producer, so it is a
+    dependency-free transport rather than a GIL-free fast path. IPv4-only and
+    less battle-tested than python-osc.
+
+- OSC server documentation: a `docs/guide/osc.md` guide (running a server, the
+  two transports, the complete address table, the phase poll, and known
+  partials) plus an OSC section in the README.
+
+- `benchmarks/osc_dispatch.py`: a micro-benchmark comparing python-osc dispatch,
+  native (C) dispatch, and the UDP transport floor. It quantifies why the native
+  transport dispatches under the GIL rather than via a GIL-free fast path: OSC is
+  transport-bound (a socket syscall dominates each message), so native dispatch —
+  ~18x faster in isolation — saves only about 7% of one `recvfrom`. The command
+  queue is kept single-producer accordingly.
+
+### Changed
+
+- CI gains a `native-osc` matrix leg (Linux/macOS/Windows) that builds with
+  `SOFTCUT_ENABLE_TINYOSC=ON` and runs the suite against both OSC transports,
+  asserting the native transport actually compiled in. A `make build-tinyosc`
+  target builds the extension with the native transport enabled.
+
+### Fixed
+
+- `make clean` no longer deletes compiled extensions inside `.venv`: its
+  `find . -name "*.so"` ran from the repo root and removed dependency `.so`
+  files (e.g. numpy's), breaking the environment. It now prunes `.venv` and
+  `.git`.
+
+- `make build` / `make build-tinyosc` use the correct distribution name
+  (`softcut-py`) for `--reinstall-package`, so a rebuild is actually forced after
+  C/C++ changes instead of silently reusing a cached build.
+
 ## [0.1.1]
 
 ### Added

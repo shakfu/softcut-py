@@ -40,6 +40,44 @@ jobs:
       - name: Test
         run: uv run pytest tests/ -q
 
+  # Guards the experimental native OSC transport (not built into the published
+  # wheels) against bit-rot: builds it on every push and runs the suite against
+  # both transports across all three OSes, exercising the cross-platform socket
+  # code. Keep this leg while the native transport remains experimental.
+  native-osc:
+    name: Native OSC (${{ matrix.os }})
+    needs: qa
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # Compile the vendored tinyosc native OSC transport into the extension so
+      # the native backend (and its cross-platform socket code) is exercised.
+      SKBUILD_CMAKE_DEFINE: SOFTCUT_ENABLE_TINYOSC=ON
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build with native OSC enabled
+        run: uv sync
+
+      - name: Verify native transport compiled in
+        # Guard against a cached/misconfigured build silently disabling the
+        # native tests (they skip when HAVE_TINYOSC is false).
+        run: uv run python -c "from softcut import _core; assert _core.HAVE_TINYOSC, 'tinyosc not compiled in'; print('HAVE_TINYOSC OK')"
+
+      - name: Test (both OSC transports)
+        run: uv run pytest tests/ -q
+
   build-smoke:
     name: Build smoke (${{ matrix.os }} / py${{ matrix.python }})
     needs: qa
