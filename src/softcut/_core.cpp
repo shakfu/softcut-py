@@ -35,6 +35,15 @@
 #include <chrono>
 #include <cstring>
 #ifdef _WIN32
+// Keep <windows.h> (pulled in by winsock2) from defining the min/max macros,
+// which otherwise break std::min/std::max used elsewhere in this file, and trim
+// the header to avoid other symbol clashes.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
