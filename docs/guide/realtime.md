@@ -26,7 +26,7 @@ with softcut.Engine(voices=1) as eng:
         time.sleep(0.5)
 ```
 
-!!! warning "Single producer" The queue assumes a single producer (the GIL-holding Python thread). This is why free-threaded (`cp31Xt`) wheels are intentionally not built — multiple Python threads setting parameters concurrently would violate that assumption. Drive parameters from one thread.
+!!! warning "Single producer" The queue assumes a single producer (the GIL-holding Python thread). This is why free-threaded (`cp31Xt`) wheels are intentionally not built — multiple Python threads setting parameters concurrently would violate that assumption. Drive parameters from one thread. (The optional native OSC transport does not break this: its GIL-free receiver posts to its *own* separate single-producer queue, which the audio thread drains alongside this one.)
 
 ## Reading state back
 

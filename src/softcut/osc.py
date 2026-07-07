@@ -120,6 +120,10 @@ class _PhasePoll:
                 self._last[i] = phase
                 self._client.send_message(self.ADDRESS, [i, phase])
 
+    def reset(self) -> None:
+        """Clear change detection so the next poll re-emits every voice."""
+        self._last = [None] * self._n
+
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
@@ -175,10 +179,16 @@ class SoftcutOSC:
         self._handlers = self._build_handlers()
 
         if self.backend == "native":
-            self._sender = _core._OscSender(reply_host, reply_port)
+            # Native outbound: a C phase-poll thread reads quant_phase and sends
+            # the reply entirely in C, so no periodic GIL holder remains. It owns
+            # its own reply socket, so no separate _OscSender is needed.
+            self._sender = None
+            self._phase = _core._OscPhasePoll(
+                self.host.engine._core, reply_host, reply_port, phase_period
+            )
         else:
             self._sender = SimpleUDPClient(reply_host, reply_port)
-        self._phase = _PhasePoll(self.host, self._sender, period=phase_period)
+            self._phase = _PhasePoll(self.host, self._sender, period=phase_period)
 
         if self.backend == "native":
             # A weakref breaks the SoftcutOSC <-> receiver <-> callback cycle
@@ -190,7 +200,12 @@ class SoftcutOSC:
                 if s is not None:
                     s._dispatch(address, list(args))  # type: ignore[arg-type]
 
-            self._receiver = _core._OscReceiver(listen_host, listen_port, native_cb)
+            # Hand the low-level engine to the receiver so per-voice
+            # /set/param/cut/* messages dispatch in C without the GIL; the
+            # callback handles every other address.
+            self._receiver = _core._OscReceiver(
+                listen_host, listen_port, native_cb, self.host.engine._core
+            )
             self._server = None
             self._thread = None
         else:

@@ -4,7 +4,7 @@
 # This Makefile wraps common build commands for convenience.
 # The actual build is handled by scikit-build-core via pyproject.toml
 
-.PHONY: all sync build rebuild build-tinyosc test lint format typecheck qa demos demo-looper clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
+.PHONY: all sync build rebuild build-tinyosc build-bench build-standalone test-standalone test lint format typecheck qa demos demo-looper clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
 
 # Default target
 all: build
@@ -23,6 +23,21 @@ rebuild: build
 # Build with the optional native OSC codec (vendored tinyosc) compiled in.
 build-tinyosc:
 	@SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" uv sync --reinstall-package softcut-py --no-cache
+
+# Build for benchmarks/osc_jitter.py: native OSC transport plus the compile-time
+# apply-latency probe (both off in normal builds).
+build-bench:
+	@SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON;SOFTCUT_ENABLE_BENCH_PROBE=ON" uv sync --reinstall-package softcut-py --no-cache
+
+# Build the standalone, no-Python OSC server binary (clients/softcut-osc).
+build-standalone:
+	@cmake -S clients/softcut-osc -B build/softcut-osc -DCMAKE_BUILD_TYPE=Release
+	@cmake --build build/softcut-osc
+
+# Headless smoke test for the standalone binary (drives it over UDP, no Python
+# in the server).
+test-standalone: build-standalone
+	@python3 clients/softcut-osc/test_smoke.py
 
 # Run tests
 test:

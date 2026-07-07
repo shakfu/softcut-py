@@ -24,5 +24,6 @@ make demo-looper                                # the interactive mic looper (06
 | `09_filters.py` | pre filter (record colouration) and post filter modes (lp/hp/bp/br) |
 | `10_phase_sync.py` | `sync()`, `phase_quant`/`quant_phase`, and live `position` polling |
 | `11_capture.py` | `rec_once` one-shot, reverse record, and `rec_offset` feedback delay |
+| `12_norns_api.py` | the norns `softcut` compatibility API (`from softcut import norns as softcut`) |
 
 `demos/_util.py` holds the shared helpers (`load_wav_mono`, `write_wav`, `to_buffer`, `render_seconds`, `play`). Because softcut voices are mono, stereo sources are summed to mono on load; the engine mixes voices back to stereo via each voice's `level` and `pan`.

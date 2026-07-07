@@ -213,9 +213,10 @@ def test_phase_poll_emits_on_change(backend):
         host.render(np.zeros(int(0.5 * SR), np.float32))  # advance voice 0 to ~0.45
 
         def emitted_voice0():
-            # Force a re-emit of voice 0 each attempt (robust to a dropped
-            # datagram); poll_once only sends when the quantized phase changed.
-            srv.phase_poll._last[0] = None
+            # Force a re-emit each attempt (robust to a dropped datagram);
+            # poll_once only sends when the quantized phase changed. reset() is
+            # backend-agnostic (Python _PhasePoll and the native _OscPhasePoll).
+            srv.phase_poll.reset()
             srv.phase_poll.poll_once()
             return any(a[0] == 0 for a in received)
 

@@ -16,6 +16,16 @@ find_package(nanobind CONFIG REQUIRED)
 option(SOFTCUT_ENABLE_TINYOSC
     "Compile the experimental vendored tinyosc native OSC transport into _core" OFF)
 
+# Optional benchmark-only apply-latency probe (benchmarks/osc_jitter.py). It
+# stamps a timestamp at each parameter apply so the benchmark can isolate OSC
+# dispatch latency from a GIL-gated Python observer. OFF by default and absent
+# from published wheels; keep it out of the production apply path unless
+# benchmarking. Enable (with tinyosc, for the native rows) via:
+#   SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON;SOFTCUT_ENABLE_BENCH_PROBE=ON"
+# (see `make build-bench`).
+option(SOFTCUT_ENABLE_BENCH_PROBE
+    "Compile the benchmark-only parameter apply-latency probe into _core" OFF)
+
 # softcut-lib: the per-voice DSP engine we are wrapping. It owns no buffer
 # memory and has no external dependencies, so we compile its sources straight
 # into the extension module.
@@ -39,12 +49,19 @@ nanobind_add_module(_core
     ${SOFTCUT_LIB}/src/Svf.cpp)
 
 target_include_directories(_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src        # for shared/*.hpp (Python-free core)
     ${SOFTCUT_LIB}/include
     ${SOFTCUT_LIB}/src
     ${MINIAUDIO})
 
 # We only need realtime device I/O, not miniaudio's file decoders/encoders.
 target_compile_definitions(_core PRIVATE MA_NO_DECODING MA_NO_ENCODING)
+
+# Benchmark-only apply-latency probe; guards its symbols in _core.cpp.
+if(SOFTCUT_ENABLE_BENCH_PROBE)
+    message(STATUS "softcut: benchmark apply-latency probe enabled")
+    target_compile_definitions(_core PRIVATE SOFTCUT_BENCH_PROBE)
+endif()
 
 if(MSVC)
     target_compile_options(_core PRIVATE /W4)

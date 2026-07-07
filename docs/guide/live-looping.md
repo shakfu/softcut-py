@@ -54,7 +54,7 @@ Voices and the engine have informative reprs, so they read well in a REPL:
 
 ```python
 >>> eng[0]
-Voice(rate=1.0, loop=[0.0, 4.0], rec=False, play=True, level=0.8, pan=-0.3, pos=1.23)
+Voice(rate=1, loop=[0, 4], rec=False, play=True, level=0.8, pan=-0.3, pos=1.230)
 >>> eng
 Engine(voices=2, sr=48000, mode='duplex', block_size=512, running=True)
 ```

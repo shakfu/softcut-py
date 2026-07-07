@@ -1,6 +1,12 @@
 # Design proposal: a norns-compatible API layer
 
-Status: proposal (not yet implemented)
+Status: **implemented** in `softcut.norns` (since 0.1.1). This document is the original design record; it is kept for rationale. What actually shipped versus the proposal below:
+
+- **Tiers A and B shipped** in `softcut.norns.NornsSoftcut` (attribute passthrough and the numpy + stdlib-`wave` buffer/disk ops). The illustrative `_NornsSoftcut` sketch below is pre-implementation; the real class is `NornsSoftcut`.
+
+- **Tier C (phase polling) did *not* land in the norns layer.** It is instead provided by the OSC server (`softcut.osc`): a phase poll that reports `/poll/softcut/phase` — and, on the native backend, runs entirely in C (`_core._OscPhasePoll`). See [the OSC guide](../guide/osc.md).
+
+- **Tier D remains open**: `level_slew_time` / `pan_slew_time` are still not exposed by the binding (accepted-and-ignored over OSC), `in_cut` uses the scalar per-voice input gain (no ADC matrix), and `enable` maps to the play flag.
 
 ## Goal
 

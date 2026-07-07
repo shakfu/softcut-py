@@ -15,10 +15,14 @@
 #include <array>
 #include <atomic>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "softcut/Voice.h"
@@ -26,33 +30,22 @@
 
 #include "miniaudio.h"
 
+#include "shared/command_queue.hpp"
+#include "shared/device.hpp"
+#include "shared/mixer.hpp"
+
 // Native OSC codec, compiled in only when the CMake option SOFTCUT_ENABLE_TINYOSC
 // is set. The default build ships without it; the pure-Python option (python-osc)
 // covers OSC at runtime instead.
 #ifdef SOFTCUT_TINYOSC
 #include "tinyosc.h"
+#include "shared/osc_socket.hpp"  // UDP socket helpers + platform network headers
+#include <condition_variable>
+#include <limits>
+#include <mutex>
 #include <thread>
 #include <chrono>
 #include <cstring>
-#ifdef _WIN32
-// Keep <windows.h> (pulled in by winsock2) from defining the min/max macros,
-// which otherwise break std::min/std::max used elsewhere in this file, and trim
-// the header to avoid other symbol clashes.
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
 #endif
 
 namespace nb = nanobind;
@@ -63,40 +56,43 @@ using BufferArray = nb::ndarray<float, nb::ndim<1>, nb::c_contig, nb::device::cp
 
 namespace {
 
-// Single-producer / single-consumer lock-free ring of small commands. The
-// control thread (Python, GIL held) pushes; the audio thread drains at each
-// block. Commands are tiny lambdas (a Voice* plus a scalar) that fit in
-// std::function's small-buffer storage, so push/pop/call never touch the heap.
+// The SPSC command queue lives in a shared header (used by the standalone server
+// too). This binding uses two instances -- one fed by the Python control thread
+// (GIL held), one by the native OSC receiver (GIL-free) -- each drained by the
+// audio thread, so each stays strictly single-producer. See shared/command_queue.hpp.
+using scsh::CommandQueue;
+
+// Benchmark-only apply-latency probe, compiled in only when the CMake option
+// SOFTCUT_ENABLE_BENCH_PROBE is set (SOFTCUT_BENCH_PROBE); absent from normal and
+// published builds. When enabled, each parameter apply -- in the native OSC fast
+// path or in the Python setter -- records a steady_clock timestamp plus the
+// applied value, so benchmarks/osc_jitter.py can measure send->apply latency
+// without a GIL-gated Python observer in the loop (paired with the send-side
+// _steady_clock_ns).
 //
-// The native OSC receiver (SOFTCUT_TINYOSC) is not a second producer: it
-// dispatches under the GIL, so its queue pushes serialize with the Python
-// control thread on the GIL, and this stays single-producer. A GIL-free native
-// dispatch path would need a multi-producer queue -- see benchmarks/osc_dispatch.py
-// for why that path is not worth building (it is transport-bound, not
-// dispatch-bound).
-struct CommandQueue {
-    static constexpr size_t CAP = 4096;  // power of two
-    std::array<std::function<void()>, CAP> buf;
-    std::atomic<size_t> head{0};  // producer writes here
-    std::atomic<size_t> tail{0};  // consumer reads here
+// The value is published last with release, and the benchmark reads it with
+// acquire (_bench_probe_applied): once it sees its own value, the paired
+// timestamp store (sequenced-before the release) is guaranteed visible, so the
+// timestamp it reads belongs to *this* apply -- never a stale earlier one.
+//
+// When the flag is off, probe_stamp() is an empty inline the optimizer removes,
+// so the production apply path carries no probe code at all.
+#ifdef SOFTCUT_BENCH_PROBE
+static std::atomic<int64_t> g_probe_ns{0};
+static std::atomic<uint32_t> g_probe_val{0};  // float bits, published last
 
-    bool push(const std::function<void()> &fn) {
-        const size_t h = head.load(std::memory_order_relaxed);
-        const size_t n = (h + 1) & (CAP - 1);
-        if (n == tail.load(std::memory_order_acquire)) return false;  // full
-        buf[h] = fn;
-        head.store(n, std::memory_order_release);
-        return true;
-    }
-
-    bool pop(std::function<void()> &out) {
-        const size_t t = tail.load(std::memory_order_relaxed);
-        if (t == head.load(std::memory_order_acquire)) return false;  // empty
-        out = std::move(buf[t]);
-        tail.store((t + 1) & (CAP - 1), std::memory_order_release);
-        return true;
-    }
-};
+static inline void probe_stamp(float value) {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    g_probe_ns.store(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count(),
+        std::memory_order_relaxed);
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    g_probe_val.store(bits, std::memory_order_release);
+}
+#else
+static inline void probe_stamp(float) {}
+#endif
 
 struct Voice {
     softcut::Voice v;
@@ -111,8 +107,13 @@ struct Voice {
     float input_gain_ = 1.0f;
 
     // Set when the voice is hosted by an Engine. While the engine is running,
-    // DSP setters are applied on the audio thread via the command queue.
+    // DSP setters are applied on the audio thread via a command queue. There are
+    // two queues, one per producer, so each stays single-producer/single-
+    // consumer: cmd_queue_ is fed by the Python control thread (GIL held) and
+    // osc_queue_ by the native OSC receiver thread (GIL-free). The audio thread
+    // is the sole consumer of both (Engine::drain_commands drains each).
     CommandQueue *cmd_queue_ = nullptr;
+    CommandQueue *osc_queue_ = nullptr;
     std::atomic<bool> *engine_running_ = nullptr;
 
     // Apply a softcut DSP change now, or defer it to the audio thread if an
@@ -126,42 +127,57 @@ struct Voice {
         fn();
     }
 
+    // Like dsp_apply, but posts to the native OSC receiver's dedicated queue.
+    // Called only from the OSC receiver thread, so osc_queue_ has one producer.
+    void osc_apply(std::function<void()> fn) {
+        if (engine_running_ != nullptr &&
+            engine_running_->load(std::memory_order_acquire) &&
+            osc_queue_ != nullptr && osc_queue_->push(fn)) {
+            return;
+        }
+        fn();
+    }
+
     // Mirrors of write-only parameters, seeded with softcut::Voice::reset()
-    // defaults so getters are meaningful before the first set.
-    float rate_ = 1.0f;
-    float loop_start_ = 0.0f;
-    float loop_end_ = 0.0f;
-    bool loop_ = false;
-    bool rec_ = false;
-    bool rec_once_ = false;
-    bool play_ = false;
-    float fade_time_ = 0.01f;
-    float rec_level_ = 0.0f;
-    float pre_level_ = 0.0f;
-    float rec_offset_ = -8.0f / 48000.0f;
-    float rec_pre_slew_time_ = 0.001f;
-    float rate_slew_time_ = 0.001f;
-    float phase_quant_ = 0.0f;
-    float phase_offset_ = 0.0f;
+    // defaults so getters are meaningful before the first set. Atomic because
+    // the native OSC fast path (OscReceiver) writes them off the GIL while
+    // Python getters read them; every access is a relaxed load/store, so there
+    // is no data race. See std::atomic's implicit T conversion (used by the
+    // FPROP/BPROP getters and setters below).
+    std::atomic<float> rate_{1.0f};
+    std::atomic<float> loop_start_{0.0f};
+    std::atomic<float> loop_end_{0.0f};
+    std::atomic<bool> loop_{false};
+    std::atomic<bool> rec_{false};
+    std::atomic<bool> rec_once_{false};
+    std::atomic<bool> play_{false};
+    std::atomic<float> fade_time_{0.01f};
+    std::atomic<float> rec_level_{0.0f};
+    std::atomic<float> pre_level_{0.0f};
+    std::atomic<float> rec_offset_{-8.0f / 48000.0f};
+    std::atomic<float> rec_pre_slew_time_{0.001f};
+    std::atomic<float> rate_slew_time_{0.001f};
+    std::atomic<float> phase_quant_{0.0f};
+    std::atomic<float> phase_offset_{0.0f};
 
     // Pre filter
-    float pre_filter_fc_ = 16000.0f;
-    float pre_filter_rq_ = 4.0f;
-    float pre_filter_lp_ = 1.0f;
-    float pre_filter_hp_ = 0.0f;
-    float pre_filter_bp_ = 0.0f;
-    float pre_filter_br_ = 0.0f;
-    float pre_filter_dry_ = 0.0f;
-    float pre_filter_fc_mod_ = 1.0f;
+    std::atomic<float> pre_filter_fc_{16000.0f};
+    std::atomic<float> pre_filter_rq_{4.0f};
+    std::atomic<float> pre_filter_lp_{1.0f};
+    std::atomic<float> pre_filter_hp_{0.0f};
+    std::atomic<float> pre_filter_bp_{0.0f};
+    std::atomic<float> pre_filter_br_{0.0f};
+    std::atomic<float> pre_filter_dry_{0.0f};
+    std::atomic<float> pre_filter_fc_mod_{1.0f};
 
     // Post filter
-    float post_filter_fc_ = 12000.0f;
-    float post_filter_rq_ = 4.0f;
-    float post_filter_lp_ = 0.0f;
-    float post_filter_hp_ = 0.0f;
-    float post_filter_bp_ = 0.0f;
-    float post_filter_br_ = 0.0f;
-    float post_filter_dry_ = 1.0f;
+    std::atomic<float> post_filter_fc_{12000.0f};
+    std::atomic<float> post_filter_rq_{4.0f};
+    std::atomic<float> post_filter_lp_{0.0f};
+    std::atomic<float> post_filter_hp_{0.0f};
+    std::atomic<float> post_filter_bp_{0.0f};
+    std::atomic<float> post_filter_br_{0.0f};
+    std::atomic<float> post_filter_dry_{1.0f};
 
     explicit Voice(float sr) : sample_rate(sr) {
         v.setSampleRate(sr);
@@ -221,8 +237,10 @@ struct Engine {
     std::vector<float> fb;        // feedback matrix, fb[src*n_voices + dst]
     std::vector<float> prev_out;  // last block's per-voice output (n*block_size)
     std::vector<float> cur_out;   // this block's per-voice output (n*block_size)
+    std::vector<scsh::VoiceMix> mix;  // per-block voice view (refreshed each block)
 
-    CommandQueue queue;
+    CommandQueue queue;      // producer: Python control thread (GIL held)
+    CommandQueue osc_queue;  // producer: native OSC receiver thread (GIL-free)
     std::atomic<bool> running{false};
 
     ma_context context;
@@ -243,9 +261,11 @@ struct Engine {
         fb.assign(static_cast<size_t>(n_voices) * n_voices, 0.0f);
         prev_out.assign(static_cast<size_t>(n_voices) * block_size, 0.0f);
         cur_out.assign(static_cast<size_t>(n_voices) * block_size, 0.0f);
+        mix.resize(static_cast<size_t>(n_voices));
         for (Voice *vp : voices) {
             vp->set_sample_rate(sr);
             vp->cmd_queue_ = &queue;
+            vp->osc_queue_ = &osc_queue;
             vp->engine_running_ = &running;
         }
     }
@@ -256,6 +276,7 @@ struct Engine {
         if (context_inited) ma_context_uninit(&context);
         for (Voice *vp : voices) {  // never leave dangling pointers into us
             vp->cmd_queue_ = nullptr;
+            vp->osc_queue_ = nullptr;
             vp->engine_running_ = nullptr;
         }
     }
@@ -264,37 +285,23 @@ struct Engine {
     // each block, and on the control thread once the device has stopped.
     void drain_commands() {
         std::function<void()> fn;
-        while (queue.pop(fn)) fn();
+        while (queue.pop(fn)) fn();       // Python-control-thread commands
+        while (osc_queue.pop(fn)) fn();   // native-OSC-thread commands
     }
 
     // Process up to block_size frames of mono input into interleaved stereo
     // output, applying per-voice input gain and voice->voice feedback (delayed
     // by one block). GIL-free and allocation-free.
     void process_core(const float *ext_in, float *out, int frames) {
-        for (int i = 0; i < frames * out_channels; ++i) out[i] = 0.0f;
-        for (int dst = 0; dst < n_voices; ++dst) {
-            Voice *vp = voices[dst];
-            float *vin = voice_in.data();
-            const float ig = vp->input_gain_;
-            for (int i = 0; i < frames; ++i) vin[i] = ext_in ? ext_in[i] * ig : 0.0f;
-            for (int src = 0; src < n_voices; ++src) {
-                const float g = fb[static_cast<size_t>(src) * n_voices + dst];
-                if (g == 0.0f) continue;
-                const float *po = prev_out.data() + static_cast<size_t>(src) * block_size;
-                for (int i = 0; i < frames; ++i) vin[i] += po[i] * g;
-            }
-            float *o = cur_out.data() + static_cast<size_t>(dst) * block_size;
-            vp->v.processBlockMono(vin, o, frames);
-            // equal-power pan: pan -1..1 -> angle 0..pi/2
-            const float level = vp->level_;
-            const float theta = (vp->pan_ * 0.5f + 0.5f) * 1.5707963267948966f;
-            const float gl = level * std::cos(theta);
-            const float gr = level * std::sin(theta);
-            for (int f = 0; f < frames; ++f) {
-                out[f * out_channels + 0] += o[f] * gl;
-                if (out_channels > 1) out[f * out_channels + 1] += o[f] * gr;
-            }
+        // Refresh the per-voice view (mix params live in our Voice wrapper), then
+        // run the shared mixer. GIL-free and allocation-free.
+        for (int i = 0; i < n_voices; ++i) {
+            Voice *vp = voices[i];
+            mix[static_cast<size_t>(i)] = {&vp->v, vp->level_, vp->pan_, vp->input_gain_};
         }
+        scsh::process_block(mix.data(), n_voices, block_size, out_channels,
+                            fb.data(), ext_in, out, frames, voice_in.data(),
+                            prev_out.data(), cur_out.data());
         std::swap(prev_out, cur_out);  // this block's outputs feed the next
     }
 
@@ -356,39 +363,14 @@ struct Engine {
                         throw std::runtime_error("failed to initialize audio context");
                     context_inited = true;
                 }
-                ma_device_info *playback_infos, *capture_infos;
-                ma_uint32 n_playback, n_capture;
-                if (ma_context_get_devices(&context, &playback_infos, &n_playback,
-                                           &capture_infos, &n_capture) != MA_SUCCESS)
-                    throw std::runtime_error("failed to enumerate audio devices");
-                if (output_device_index >= 0) {
-                    if (output_device_index >= static_cast<int>(n_playback))
-                        throw std::invalid_argument("output_device index out of range");
-                    playback_id = playback_infos[output_device_index].id;
-                    p_playback_id = &playback_id;
-                }
-                if (duplex && input_device_index >= 0) {
-                    if (input_device_index >= static_cast<int>(n_capture))
-                        throw std::invalid_argument("input_device index out of range");
-                    capture_id = capture_infos[input_device_index].id;
-                    p_capture_id = &capture_id;
-                }
+                scsh::resolve_device_ids(context, output_device_index,
+                                         input_device_index, duplex, playback_id,
+                                         capture_id, p_playback_id, p_capture_id);
             }
 
-            ma_device_config cfg = ma_device_config_init(
-                duplex ? ma_device_type_duplex : ma_device_type_playback);
-            cfg.sampleRate = static_cast<ma_uint32>(sample_rate);
-            cfg.periodSizeInFrames = static_cast<ma_uint32>(block_size);
-            cfg.playback.format = ma_format_f32;
-            cfg.playback.channels = static_cast<ma_uint32>(out_channels);
-            cfg.playback.pDeviceID = p_playback_id;
-            if (duplex) {
-                cfg.capture.format = ma_format_f32;
-                cfg.capture.channels = 1;  // miniaudio sums device channels to mono
-                cfg.capture.pDeviceID = p_capture_id;
-            }
-            cfg.dataCallback = &Engine::data_callback;
-            cfg.pUserData = this;
+            ma_device_config cfg = scsh::make_device_config(
+                sample_rate, block_size, duplex, out_channels, p_playback_id,
+                p_capture_id, &Engine::data_callback, this);
             ma_context *p_ctx = context_inited ? &context : nullptr;
             if (ma_device_init(p_ctx, &cfg, &device) != MA_SUCCESS)
                 throw std::runtime_error("failed to initialize audio device");
@@ -458,53 +440,83 @@ nb::list list_audio_devices() {
 // GIL rather than posting from a second thread. This makes the native path a
 // dependency-free transport (no python-osc), not a GIL-free fast path.
 
-#ifdef _WIN32
-using socket_t = SOCKET;
-static const socket_t kInvalidSocket = INVALID_SOCKET;
-static void close_socket(socket_t s) { closesocket(s); }
-static void ensure_sockets() {
-    static bool done = false;
-    if (!done) {
-        WSADATA w;
-        WSAStartup(MAKEWORD(2, 2), &w);
-        done = true;
-    }
-}
-static void set_recv_timeout_ms(socket_t s, int ms) {
-    DWORD tv = static_cast<DWORD>(ms);
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&tv),
-               sizeof(tv));
-}
-#else
-using socket_t = int;
-static const socket_t kInvalidSocket = -1;
-static void close_socket(socket_t s) { ::close(s); }
-static void ensure_sockets() {}
-static void set_recv_timeout_ms(socket_t s, int ms) {
-    struct timeval tv;
-    tv.tv_sec = ms / 1000;
-    tv.tv_usec = (ms % 1000) * 1000;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-}
-#endif
+// UDP socket helpers are shared with the standalone server (see
+// shared/osc_socket.hpp, included at file scope above).
+using scsh::socket_t;
+using scsh::kInvalidSocket;
+using scsh::close_socket;
+using scsh::ensure_sockets;
+using scsh::set_recv_timeout_ms;
+using scsh::make_sockaddr;
 
-static void make_sockaddr(const std::string &host, int port, sockaddr_in &addr) {
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(static_cast<uint16_t>(port));
-    if (host.empty() || host == "0.0.0.0" ||
-        inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
-        addr.sin_addr.s_addr = INADDR_ANY;
-    }
+// --- Native fast-path dispatch tables ---------------------------------------
+//
+// The per-voice `/set/param/cut/*` messages are the real-time control traffic.
+// Each maps 1:1 to a softcut::Voice setter plus a Voice mirror field, so the
+// receiver can dispatch them entirely in C -- no GIL, no Python callback --
+// writing the atomic mirror and posting the setter to the engine's OSC command
+// queue. Everything else (buffer ops, level/pan, lifecycle, position, ...) is
+// not in these tables and falls back to the Python callback path in deliver().
+struct FloatParam {
+    std::atomic<float> Voice::*mirror;
+    void (softcut::Voice::*setter)(float);
+};
+struct BoolParam {
+    std::atomic<bool> Voice::*mirror;
+    void (softcut::Voice::*setter)(bool);
+};
+
+static const std::unordered_map<std::string, FloatParam> &float_params() {
+    static const std::unordered_map<std::string, FloatParam> t = {
+        {"/set/param/cut/rate", {&Voice::rate_, &softcut::Voice::setRate}},
+        {"/set/param/cut/loop_start", {&Voice::loop_start_, &softcut::Voice::setLoopStart}},
+        {"/set/param/cut/loop_end", {&Voice::loop_end_, &softcut::Voice::setLoopEnd}},
+        {"/set/param/cut/fade_time", {&Voice::fade_time_, &softcut::Voice::setFadeTime}},
+        {"/set/param/cut/rec_level", {&Voice::rec_level_, &softcut::Voice::setRecLevel}},
+        {"/set/param/cut/pre_level", {&Voice::pre_level_, &softcut::Voice::setPreLevel}},
+        {"/set/param/cut/rec_offset", {&Voice::rec_offset_, &softcut::Voice::setRecOffset}},
+        {"/set/param/cut/recpre_slew_time", {&Voice::rec_pre_slew_time_, &softcut::Voice::setRecPreSlewTime}},
+        {"/set/param/cut/rate_slew_time", {&Voice::rate_slew_time_, &softcut::Voice::setRateSlewTime}},
+        {"/set/param/cut/phase_quant", {&Voice::phase_quant_, &softcut::Voice::setPhaseQuant}},
+        {"/set/param/cut/phase_offset", {&Voice::phase_offset_, &softcut::Voice::setPhaseOffset}},
+        {"/set/param/cut/pre_filter_fc", {&Voice::pre_filter_fc_, &softcut::Voice::setPreFilterFc}},
+        {"/set/param/cut/pre_filter_fc_mod", {&Voice::pre_filter_fc_mod_, &softcut::Voice::setPreFilterFcMod}},
+        {"/set/param/cut/pre_filter_rq", {&Voice::pre_filter_rq_, &softcut::Voice::setPreFilterRq}},
+        {"/set/param/cut/pre_filter_lp", {&Voice::pre_filter_lp_, &softcut::Voice::setPreFilterLp}},
+        {"/set/param/cut/pre_filter_hp", {&Voice::pre_filter_hp_, &softcut::Voice::setPreFilterHp}},
+        {"/set/param/cut/pre_filter_bp", {&Voice::pre_filter_bp_, &softcut::Voice::setPreFilterBp}},
+        {"/set/param/cut/pre_filter_br", {&Voice::pre_filter_br_, &softcut::Voice::setPreFilterBr}},
+        {"/set/param/cut/pre_filter_dry", {&Voice::pre_filter_dry_, &softcut::Voice::setPreFilterDry}},
+        {"/set/param/cut/post_filter_fc", {&Voice::post_filter_fc_, &softcut::Voice::setPostFilterFc}},
+        {"/set/param/cut/post_filter_rq", {&Voice::post_filter_rq_, &softcut::Voice::setPostFilterRq}},
+        {"/set/param/cut/post_filter_lp", {&Voice::post_filter_lp_, &softcut::Voice::setPostFilterLp}},
+        {"/set/param/cut/post_filter_hp", {&Voice::post_filter_hp_, &softcut::Voice::setPostFilterHp}},
+        {"/set/param/cut/post_filter_bp", {&Voice::post_filter_bp_, &softcut::Voice::setPostFilterBp}},
+        {"/set/param/cut/post_filter_br", {&Voice::post_filter_br_, &softcut::Voice::setPostFilterBr}},
+        {"/set/param/cut/post_filter_dry", {&Voice::post_filter_dry_, &softcut::Voice::setPostFilterDry}},
+    };
+    return t;
 }
 
-// Receives OSC over UDP and delivers each parsed message to a Python callback
-// as (address: str, args: list). Args cover the i/f/s/h/d/T/F type tags used by
-// the softcut protocol; an unknown tag stops parsing that message.
+static const std::unordered_map<std::string, BoolParam> &bool_params() {
+    static const std::unordered_map<std::string, BoolParam> t = {
+        {"/set/param/cut/loop_flag", {&Voice::loop_, &softcut::Voice::setLoopFlag}},
+        {"/set/param/cut/rec_flag", {&Voice::rec_, &softcut::Voice::setRecFlag}},
+        {"/set/param/cut/rec_once", {&Voice::rec_once_, &softcut::Voice::setRecOnceFlag}},
+        {"/set/param/cut/play_flag", {&Voice::play_, &softcut::Voice::setPlayFlag}},
+    };
+    return t;
+}
+
+// Receives OSC over UDP. Per-voice param messages are dispatched in C without
+// the GIL (see try_fast_dispatch); every other address is delivered to a Python
+// callback as (address: str, args: list). Args cover the i/f/s/h/d/T/F type tags
+// used by the softcut protocol; an unknown tag stops parsing that message.
 class OscReceiver {
 public:
-    OscReceiver(const std::string &host, int port, nb::callable cb)
-        : callback_(std::move(cb)) {
+    OscReceiver(const std::string &host, int port, nb::callable cb,
+                Engine *engine)
+        : callback_(std::move(cb)), engine_(engine) {
         ensure_sockets();
         sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
         if (sock_ == kInvalidSocket)
@@ -564,12 +576,61 @@ private:
                 tosc_bundle b;
                 tosc_parseBundle(&b, buf.data(), n);
                 tosc_message m;
-                while (tosc_getNextMessage(&b, &m)) deliver(&m);
+                while (tosc_getNextMessage(&b, &m)) handle(&m);
             } else {
                 tosc_message m;
-                if (tosc_parseMessage(&m, buf.data(), n) == 0) deliver(&m);
+                if (tosc_parseMessage(&m, buf.data(), n) == 0) handle(&m);
             }
         }
+    }
+
+    // Route one parsed message: try the GIL-free fast path, else the Python
+    // callback. try_fast_dispatch must not consume the message's args unless it
+    // commits to handling it, so a fall-through leaves the cursor for deliver().
+    void handle(tosc_message *m) {
+        if (engine_ != nullptr && try_fast_dispatch(m)) return;
+        deliver(m);
+    }
+
+    // Dispatch a `/set/param/cut/*` (voice:int, value:int|float) message
+    // entirely in C, without the GIL. Returns false (cursor untouched) for any
+    // address or shape it does not handle, so deliver() can take over.
+    bool try_fast_dispatch(tosc_message *m) {
+        const char *fmt = tosc_getFormat(m);
+        // Exactly two args: an int voice index and an int or float value.
+        if (fmt == nullptr || fmt[0] != 'i') return false;
+        const char t1 = fmt[1];
+        if ((t1 != 'f' && t1 != 'i') || fmt[2] != '\0') return false;
+
+        const char *addr = tosc_getAddress(m);
+        const auto &fmap = float_params();
+        const auto fit = fmap.find(addr);
+        const auto &bmap = bool_params();
+        const auto bit = (fit == fmap.end()) ? bmap.find(addr) : bmap.end();
+        if (fit == fmap.end() && bit == bmap.end()) return false;
+
+        // Committed: reading args now advances the message cursor.
+        const int vi = tosc_getNextInt32(m);
+        const float raw = (t1 == 'f') ? tosc_getNextFloat(m)
+                                      : static_cast<float>(tosc_getNextInt32(m));
+        if (vi < 0 || vi >= engine_->n_voices) return true;  // drop bad index
+        Voice *pv = engine_->voices[static_cast<size_t>(vi)];
+
+        if (fit != fmap.end()) {
+            const FloatParam fp = fit->second;
+            (pv->*(fp.mirror)).store(raw, std::memory_order_relaxed);
+            const auto setter = fp.setter;
+            pv->osc_apply([pv, setter, raw] { (pv->v.*setter)(raw); });
+            probe_stamp(raw);  // apply-latency probe (benchmark only)
+        } else {
+            const BoolParam bp = bit->second;
+            const bool val = raw != 0.0f;
+            (pv->*(bp.mirror)).store(val, std::memory_order_relaxed);
+            const auto setter = bp.setter;
+            pv->osc_apply([pv, setter, val] { (pv->v.*setter)(val); });
+            probe_stamp(val ? 1.0f : 0.0f);
+        }
+        return true;
     }
 
     void deliver(tosc_message *m) {
@@ -597,6 +658,7 @@ private:
     }
 
     nb::callable callback_;
+    Engine *engine_ = nullptr;  // fast-path target; null = Python callback only
     std::atomic<bool> running_{false};
     std::thread thread_;
     socket_t sock_ = kInvalidSocket;
@@ -642,29 +704,131 @@ private:
     socket_t sock_ = kInvalidSocket;
     sockaddr_in dest_;
 };
+
+// Native, GIL-free phase poll: the outbound analogue of OscReceiver's fast path
+// and a drop-in for the Python _PhasePoll. A background thread reads each voice's
+// quantized phase (a plain C++ read, no GIL -- the same off-thread read the
+// Python poll already does) and, when it changes, sends
+// `/poll/softcut/phase <voice:int> <phase:float>` to the reply address in C.
+// With this, nothing on the softcut control path -- inbound or outbound -- needs
+// the interpreter, so a busy Python thread can no longer delay or jitter it.
+class OscPhasePoll {
+public:
+    OscPhasePoll(Engine *engine, const std::string &host, int port, double period)
+        : engine_(engine), period_(period) {
+        ensure_sockets();
+        sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock_ == kInvalidSocket)
+            throw std::runtime_error("OSC phase poll: socket() failed");
+        make_sockaddr(host, port, dest_);
+        const size_t n = engine_ ? static_cast<size_t>(engine_->n_voices) : 0;
+        last_.assign(n, std::numeric_limits<double>::quiet_NaN());
+    }
+
+    ~OscPhasePoll() {
+        stop();
+        if (sock_ != kInvalidSocket) close_socket(sock_);
+    }
+
+    void start() {
+        if (running_.exchange(true)) return;
+        thread_ = std::thread([this] { run(); });
+    }
+
+    void stop() {
+        if (!running_.exchange(false)) return;
+        cv_.notify_all();  // wake the poll thread out of its wait_for
+        if (thread_.joinable()) {
+            nb::gil_scoped_release rel;  // the poll thread takes no GIL, but let
+            thread_.join();              // other Python threads run during join
+        }
+    }
+
+    bool running() const { return running_.load(); }
+
+    // Clear change-detection state so the next poll_once() re-emits every voice.
+    // Used by tests to force a resend (robust to a dropped reply datagram).
+    void reset() {
+        std::lock_guard<std::mutex> lk(mtx_);
+        std::fill(last_.begin(), last_.end(),
+                  std::numeric_limits<double>::quiet_NaN());
+    }
+
+    // One scan: send a message for each voice whose quantized phase changed.
+    void poll_once() {
+        std::lock_guard<std::mutex> lk(mtx_);
+        scan_locked();
+    }
+
+private:
+    void run() {
+        std::unique_lock<std::mutex> lk(mtx_);
+        while (running_.load()) {
+            scan_locked();
+            cv_.wait_for(lk, std::chrono::duration<double>(period_),
+                         [this] { return !running_.load(); });
+        }
+    }
+
+    // Caller holds mtx_. Sends are serialized with poll_once()/reset() this way.
+    void scan_locked() {
+        if (engine_ == nullptr) return;
+        const int n = engine_->n_voices;
+        for (int i = 0; i < n; ++i) {
+            const double phase = engine_->voices[static_cast<size_t>(i)]->v.getQuantPhase();
+            if (phase != last_[static_cast<size_t>(i)]) {  // exact: quantized steps
+                last_[static_cast<size_t>(i)] = phase;
+                send(i, static_cast<float>(phase));
+            }
+        }
+    }
+
+    void send(int voice, float phase) {
+        char buf[64];
+        uint32_t n = tosc_writeMessage(buf, sizeof(buf), "/poll/softcut/phase",
+                                       "if", voice, phase);
+        ::sendto(sock_, buf, static_cast<int>(n), 0,
+                 reinterpret_cast<sockaddr *>(&dest_), sizeof(dest_));
+    }
+
+    Engine *engine_ = nullptr;
+    double period_;
+    std::vector<double> last_;  // last-sent quantized phase per voice (NaN = none)
+    socket_t sock_ = kInvalidSocket;
+    sockaddr_in dest_;
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    std::mutex mtx_;
+    std::condition_variable cv_;
+};
 #endif  // SOFTCUT_TINYOSC
 
 }  // namespace
 
 // float property: mirror field (read immediately) + DSP setter routed through
-// the command queue when an engine is running.
+// the command queue when an engine is running. The mirror is atomic (the native
+// OSC path writes it off the GIL), so read/write it explicitly.
 #define FPROP(name, field, setter)                                       \
     def_prop_rw(                                                          \
-        name, [](Voice &s) { return s.field; },                          \
+        name,                                                            \
+        [](Voice &s) { return s.field.load(std::memory_order_relaxed); },\
         [](Voice &s, float x) {                                          \
-            s.field = x;                                                  \
+            s.field.store(x, std::memory_order_relaxed);                 \
             Voice *p = &s;                                                \
             s.dsp_apply([p, x] { p->v.setter(x); });                     \
+            probe_stamp(x);                                              \
         })
 
 // bool property
 #define BPROP(name, field, setter)                                       \
     def_prop_rw(                                                          \
-        name, [](Voice &s) { return s.field; },                          \
+        name,                                                            \
+        [](Voice &s) { return s.field.load(std::memory_order_relaxed); },\
         [](Voice &s, bool x) {                                           \
-            s.field = x;                                                  \
+            s.field.store(x, std::memory_order_relaxed);                 \
             Voice *p = &s;                                                \
             s.dsp_apply([p, x] { p->v.setter(x); });                     \
+            probe_stamp(x ? 1.0f : 0.0f);                                \
         })
 
 NB_MODULE(_core, m) {
@@ -805,6 +969,36 @@ NB_MODULE(_core, m) {
         "List the system audio devices as dicts with keys "
         "index/name/type/is_default.");
 
+    // --- apply-latency probe (benchmark only; compile-time gated) ---
+    // Present only when built with SOFTCUT_ENABLE_BENCH_PROBE=ON. It isolates the
+    // OSC-dispatch cost from a GIL-gated Python observer: timestamp the send with
+    // _steady_clock_ns(), poll _bench_probe_applied(value) until it reports the
+    // apply, then read _bench_last_apply_ns() -- the apply instant recorded in C
+    // on whichever thread applied it. Both timestamps share one steady_clock, so
+    // their difference excludes the observer's own GIL wait. HAVE_BENCH_PROBE lets
+    // benchmarks/osc_jitter.py detect the build. See that file.
+#ifdef SOFTCUT_BENCH_PROBE
+    m.attr("HAVE_BENCH_PROBE") = true;
+    m.def("_steady_clock_ns", []() {
+        return static_cast<int64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+    }, "Current steady_clock value in nanoseconds (matches the apply probe).");
+    m.def("_bench_probe_applied", [](float value) {
+        uint32_t want;
+        std::memcpy(&want, &value, sizeof(want));
+        return g_probe_val.load(std::memory_order_acquire) == want;
+    }, "value"_a,
+        "True once the probe has recorded an apply of this exact value; "
+        "acquire-loads so a following _bench_last_apply_ns() is its timestamp.");
+    m.def("_bench_last_apply_ns", []() {
+        return g_probe_ns.load(std::memory_order_relaxed);
+    }, "steady_clock ns of the last probed apply; read only after "
+        "_bench_probe_applied() is true for your value.");
+#else
+    m.attr("HAVE_BENCH_PROBE") = false;
+#endif
+
     // Whether the native tinyosc OSC codec was compiled in (CMake option
     // SOFTCUT_ENABLE_TINYOSC). Lets Python pick the native path or fall back to
     // the pure-Python (python-osc) option.
@@ -830,10 +1024,12 @@ NB_MODULE(_core, m) {
     }, "Round-trip an OSC message through the vendored tinyosc codec.");
 
     nb::class_<OscReceiver>(m, "_OscReceiver",
-        "Native UDP OSC receiver (tinyosc). Delivers each message to a Python "
-        "callback as (address, args); dispatch runs under the GIL.")
-        .def(nb::init<const std::string &, int, nb::callable>(),
-            "host"_a, "port"_a, "callback"_a)
+        "Native UDP OSC receiver (tinyosc). Per-voice /set/param/cut/* messages "
+        "are dispatched in C without the GIL when an engine is given; every "
+        "other address is delivered to the Python callback as (address, args).")
+        .def(nb::init<const std::string &, int, nb::callable, Engine *>(),
+            "host"_a, "port"_a, "callback"_a, "engine"_a.none() = nullptr,
+            nb::keep_alive<1, 5>())
         .def("start", &OscReceiver::start,
             "Begin receiving on a background thread.")
         .def("stop", &OscReceiver::stop,
@@ -846,6 +1042,23 @@ NB_MODULE(_core, m) {
         .def(nb::init<const std::string &, int>(), "host"_a, "port"_a)
         .def("send_message", &OscSender::send_message, "address"_a, "args"_a,
             "Send an OSC message; supports [] or [int, float] arguments.");
+
+    nb::class_<OscPhasePoll>(m, "_OscPhasePoll",
+        "Native GIL-free phase poll (tinyosc): a background thread reads each "
+        "voice's quantized phase and sends /poll/softcut/phase in C, so the "
+        "softcut reply path never touches the interpreter.")
+        .def(nb::init<Engine *, const std::string &, int, double>(),
+            "engine"_a, "host"_a, "port"_a, "period"_a = 0.01,
+            nb::keep_alive<1, 2>())
+        .def("start", &OscPhasePoll::start,
+            "Begin polling on a background thread.")
+        .def("stop", &OscPhasePoll::stop, "Stop polling and join the thread.")
+        .def("poll_once", &OscPhasePoll::poll_once,
+            "Scan all voices once, emitting a message for each changed phase.")
+        .def("reset", &OscPhasePoll::reset,
+            "Reset change detection so the next poll re-emits every voice.")
+        .def_prop_ro("running", &OscPhasePoll::running,
+            "True while the background poll thread is active.");
 
     // --- benchmark / prototype hooks (dev only) ---
     // Cost of the proposed native fast path: parse + address match + post to

@@ -50,4 +50,6 @@ This is **not** a port of the norns Lua API. It exposes softcut as Python object
 
 - [Device selection](guide/devices.md) and a numpy-native buffer model.
 
+- Drive it from any controller over the [OSC server](guide/osc.md) — including an experimental GIL-free native transport and a standalone, no-Python OSC server binary (`make build-standalone`).
+
 Start with [Installation](installation.md) and [Concepts](concepts.md).

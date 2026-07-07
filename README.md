@@ -89,6 +89,7 @@ softcut.start()                                  # open the audio device
 ```
 
 - **Attribute passthrough** — `rate`, `level`, `pan`, `play`/`rec`/`loop`, loop points, `position`, the pre/post filters, slews, phase, `buffer`, `voice_sync`, `level_cut_cut`, `reset`.
+
 - **Buffer/disk ops** — `buffer_read_*` / `buffer_write_*`, `buffer_copy_*`, `buffer_clear*`, in pure numpy plus the standard-library `wave` module (WAV only, no new dependency), with preserve/mix crossfade, edge `fade_time` and `reverse`. Operations write in place, so they are safe against the running audio thread; reads are non-resampling, matching norns.
 
 `softcut.render` / `softcut.start` / `softcut.stop` drive audio (norns runs its audio continuously; here you render offline or open the device explicitly). Phase polling and per-sample level/pan slews are not yet implemented; see [`docs/dev/norns-api.md`](docs/dev/norns-api.md) for the full mapping and status. `demos/12_norns_api.py` is a narrated walkthrough built entirely on this layer.
@@ -132,9 +133,22 @@ The full namespace is mirrored: all `/set/param/cut/*` params, routing (`/set/le
 **Two transports**, selected by `backend=` ("auto" by default):
 
 - **python-osc** — the default pure-Python transport. Install the optional extra: `pip install softcut-py[osc]`. The core package stays numpy-only.
-- **native** (**experimental**) — a dependency-free UDP transport built on the vendored [tinyosc](https://github.com/mhroth/tinyosc) codec. It is **not** compiled into the published wheels; opt in with a source build (`SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" pip install .` or `make build-tinyosc`; reported by `softcut._core.HAVE_TINYOSC`). Receiving and parsing run in C, but dispatch runs under the GIL because the DSP command queue is single-producer, so it is a dependency-free transport rather than a GIL-free fast path. It is IPv4-only and less battle-tested than python-osc; prefer python-osc unless you specifically need zero-dependency OSC.
+
+- **native** (**experimental**) — a dependency-free UDP transport built on the vendored [tinyosc](https://github.com/mhroth/tinyosc) codec. It is **not** compiled into the published wheels; opt in with a source build (`SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" pip install .` or `make build-tinyosc`; reported by `softcut._core.HAVE_TINYOSC`). Per-voice `/set/param/cut/*` messages are parsed **and dispatched entirely in C without the GIL** — via a second single-producer command queue drained on the audio thread plus atomic parameter mirrors — and the phase poll runs in C too, so a busy Python interpreter can neither delay nor be delayed by the native control path (other addresses fall back to a Python handler). It is IPv4-only and less battle-tested than python-osc; prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.
 
 A few addresses are partial, mirroring the norns layer's gaps: `enabled` maps to play, `in_cut` uses the scalar per-voice input gain (there is no per-channel ADC matrix), and level/pan slew and the VU poll are accepted-and-ignored. See [`docs/guide/osc.md`](docs/guide/osc.md) for the complete address table.
+
+### Standalone server (no Python)
+
+For a headless, interpreter-free deployment, [`clients/softcut-osc`](clients/softcut-osc/) builds a standalone native binary (softcut-lib + tinyosc + miniaudio) that speaks the same softcut OSC protocol with **no CPython at all** — so nothing on its control path can touch a GIL. It is the pure-C++ counterpart to `softcut.osc`: identical DSP and wire protocol, no library or numpy. It covers the full namespace plus WAV disk I/O (via the vendored [dr_wav](https://github.com/mackron/dr_libs), on a disk-worker thread with click-avoidance crossfades), `preserve`/`mix` blending, opt-in `--resample-on-read`, and device selection.
+
+```bash
+make build-standalone                    # -> build/softcut-osc/softcut-osc
+./build/softcut-osc/softcut-osc --help
+./build/softcut-osc/softcut-osc          # listen UDP 9999, reply 127.0.0.1:57120
+```
+
+The Python extension and this binary share their Python-free C++ core (command queue, mixer, device, sockets) under `src/shared`. See [`clients/softcut-osc/README.md`](clients/softcut-osc/README.md).
 
 ## Build and test
 
