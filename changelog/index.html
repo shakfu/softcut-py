@@ -1,0 +1,1372 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Python bindings for softcut-lib with realtime audio I/O">
+      
+      
+      
+      
+        <link rel="prev" href="../api/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Changelog - softcut</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="softcut" class="md-header__button md-logo" aria-label="softcut" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            softcut
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/shakfu/softcut-py" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="softcut" class="md-nav__button md-logo" aria-label="softcut" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    softcut
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/shakfu/softcut-py" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/live-looping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Live looping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/offline-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Offline rendering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing & feedback
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/realtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Realtime parameters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/osc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OSC server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Demos
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Unreleased]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.3.0] - 2026-07-07
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.3.0] - 2026-07-07">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-07-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.2.0] - 2026-07-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.2.0] - 2026-07-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#011" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.1.1]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.1.1]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.1.0]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.1.0]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Unreleased]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.3.0] - 2026-07-07
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.3.0] - 2026-07-07">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-07-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.2.0] - 2026-07-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.2.0] - 2026-07-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#011" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.1.1]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.1.1]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.1.0]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.1.0]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<p>All notable changes to this project will be documented in this file.</p>
+<p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>, and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
+<h2 id="unreleased">[Unreleased]<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h2 id="030-2026-07-07">[0.3.0] - 2026-07-07<a class="headerlink" href="#030-2026-07-07" title="Permanent link">&para;</a></h2>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>GIL-free native OSC fast path. Per-voice <code>/set/param/cut/*</code> messages are now parsed and applied entirely in C on the native receiver's thread — no GIL, no Python callback — by posting to a second per-producer SPSC command queue that the audio thread drains alongside the Python one (each queue stays strictly single-producer). The 26 float + 4 bool <code>Voice</code> mirror fields became <code>std::atomic</code> so Python getters stay coherent with natively-dispatched writes; non-param addresses still fall back to the Python callback. This reverses the 0.2.0 "dispatch under the GIL" design for the hot path.</p>
+</li>
+<li>
+<p>GIL-free native phase poll (<code>_core._OscPhasePoll</code>): the outbound <code>/poll/softcut/phase</code> reporter runs its scan-and-send loop in C, replacing the Python <code>_PhasePoll</code> thread for the native backend. With inbound dispatch and the outbound poll both in C, nothing on the native control path touches the GIL, so a busy interpreter can neither delay it nor be delayed by it.</p>
+</li>
+<li>
+<p><code>benchmarks/osc_jitter.py</code>: measures p99 control-latency jitter under GIL contention, with a compile-time apply-latency probe (<code>SOFTCUT_ENABLE_BENCH_PROBE</code>, <code>make build-bench</code>) that timestamps the apply instant in C to isolate dispatch latency from the GIL-gated Python observer. Under load, native's dispatch tail stays roughly flat (p99 ~0.08 ms) while python-osc's blows out (~7.6 ms).</p>
+</li>
+<li>
+<p><code>clients/softcut-osc</code>: a standalone, no-Python softcut OSC server binary (softcut-lib + tinyosc + miniaudio) that speaks the full softcut wire protocol with no interpreter, so nothing on its control path touches a GIL. Params, mix, feedback, routing, <code>voice_sync</code>, buffer clear, phase poll and lifecycle dispatch in C++; WAV disk I/O is backed by the vendored dr_wav on a dedicated disk-worker thread with click-avoidance edge crossfades (<code>--crossfade-ms</code>), <code>preserve</code>/<code>mix</code> blending, and opt-in <code>--resample-on-read</code> (miniaudio's <code>ma_resampler</code>; off by default so reads stay frame-for-frame like softcut/norns). Adds device selection (<code>--output-device</code>/<code>--input-device</code>/ <code>--list-devices</code>) and a <code>--null</code> headless backend. Build with <code>make build-standalone</code>, exercise with <code>make test-standalone</code>.</p>
+</li>
+<li>
+<p><code>src/shared</code>: a Python-free C++ core (namespace <code>scsh</code>) shared by the extension and the standalone server — the SPSC <code>CommandQueue</code>, UDP socket helpers, the multi-voice mixer (<code>VoiceMix</code> + <code>process_block</code>), and miniaudio device configuration — so the mixer/device/socket code is written once.</p>
+</li>
+<li>
+<p><code>thirdparty/dr_wav</code>: vendored dr_wav (public domain / MIT-0), used only by the standalone server for WAV read/write (the vendored miniaudio is trimmed with no codec). The Python extension keeps its numpy + stdlib <code>wave</code> path.</p>
+</li>
+<li>
+<p><code>docs/dev/tinypsc-opt.md</code>: design note on the native OSC performance levers (transport-bound vs dispatch-bound, block quantization, GIL decoupling), recording the implemented fast path and its measured payoff.</p>
+</li>
+</ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>The native OSC transport is now a GIL-free fast path for <code>/set/param/cut/*</code> dispatch rather than dispatching under the GIL as in 0.2.0; <code>benchmarks/osc_jitter.py</code> supersedes <code>benchmarks/osc_dispatch.py</code>'s hot-path conclusion for those messages.</p>
+</li>
+<li>
+<p><code>_core._OscReceiver</code> takes the low-level engine as an optional final argument (for the C fast path); the phase-poll test uses a backend-agnostic <code>reset()</code> so it drives either the Python <code>_PhasePoll</code> or the native <code>_OscPhasePoll</code>.</p>
+</li>
+</ul>
+<h2 id="020-2026-07-04">[0.2.0] - 2026-07-04<a class="headerlink" href="#020-2026-07-04" title="Permanent link">&para;</a></h2>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>OSC server (<code>softcut.osc</code>) exposing softcut over the monome softcut wire protocol, so norns/Lua scripts, SuperCollider, Max, or any OSC controller can drive softcut-py as a drop-in engine. It is a thin dispatch layer over the <code>softcut.norns</code> host: the full reference address namespace (<code>/set/param/cut/*</code>, routing, <code>/softcut/buffer/*</code>, <code>/softcut/reset</code>) maps to host methods, with the 0-based wire protocol translated to the host's 1-based API. A background phase
+  poll (<code>/poll/start|stop/cut/phase</code>) reports quantized playhead position back as
+  <code>/poll/softcut/phase &lt;voice&gt; &lt;phase&gt;</code>. Run with <code>python -m softcut.osc</code> (defaults: listen UDP 9999, reply 127.0.0.1:57120, matching the reference). Partial/known gaps mirror the norns layer: <code>enabled</code> maps to play, <code>in_cut</code> uses the scalar input gain (no per-channel ADC matrix), level/pan slew and the VU poll are accepted-and-ignored.</p>
+</li>
+<li>
+<p>Two OSC transports behind one dispatch table, selected by <code>backend=</code> ("auto"/"python-osc"/"native"):</p>
+</li>
+<li>
+<p><code>python-osc</code> as an optional extra (<code>pip install softcut-py[osc]</code>); the core stays numpy-only. The default when the native transport is not built.</p>
+</li>
+<li>
+<p>An <strong>experimental</strong>, dependency-free <code>native</code> transport (UDP socket + the vendored tinyosc codec, exposed as <code>_core._OscReceiver</code>/<code>_core._OscSender</code>), compiled in with the CMake option <code>SOFTCUT_ENABLE_TINYOSC</code> and reported by <code>softcut._core.HAVE_TINYOSC</code>. It is <strong>not</strong> enabled in the published wheels; opt in with a source build. Receiving and parsing run in C; dispatch runs under the GIL because the DSP command queue is single-producer, so it is a dependency-free transport rather than a GIL-free fast path. IPv4-only and less battle-tested than python-osc.</p>
+</li>
+<li>
+<p>OSC server documentation: a <code>docs/guide/osc.md</code> guide (running a server, the two transports, the complete address table, the phase poll, and known partials) plus an OSC section in the README.</p>
+</li>
+<li>
+<p><code>benchmarks/osc_dispatch.py</code>: a micro-benchmark comparing python-osc dispatch, native (C) dispatch, and the UDP transport floor. It quantifies why the native transport dispatches under the GIL rather than via a GIL-free fast path: OSC is transport-bound (a socket syscall dominates each message), so native dispatch — ~18x faster in isolation — saves only about 7% of one <code>recvfrom</code>. The command queue is kept single-producer accordingly.</p>
+</li>
+</ul>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>CI gains a <code>native-osc</code> matrix leg (Linux/macOS/Windows) that builds with <code>SOFTCUT_ENABLE_TINYOSC=ON</code> and runs the suite against both OSC transports, asserting the native transport actually compiled in. A <code>make build-tinyosc</code> target builds the extension with the native transport enabled.</li>
+</ul>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><code>make clean</code> no longer deletes compiled extensions inside <code>.venv</code>: its <code>find . -name "*.so"</code> ran from the repo root and removed dependency <code>.so</code> files (e.g. numpy's), breaking the environment. It now prunes <code>.venv</code> and <code>.git</code>.</p>
+</li>
+<li>
+<p><code>make build</code> / <code>make build-tinyosc</code> use the correct distribution name (<code>softcut-py</code>) for <code>--reinstall-package</code>, so a rebuild is actually forced after C/C++ changes instead of silently reusing a cached build.</p>
+</li>
+</ul>
+<h2 id="011">[0.1.1]<a class="headerlink" href="#011" title="Permanent link">&para;</a></h2>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>norns-compatible API layer (<code>softcut.norns</code>, import as <code>from softcut import norns as softcut</code>): the flat, 1-based, singleton norns <code>softcut</code> namespace (6 voices, 2 global mono buffers) over the object core. Implements Tier A (attribute passthrough: rate, level, pan, play/rec/loop, loop points, filters, slews, phase, <code>position</code>, <code>buffer</code>, <code>voice_sync</code>, <code>level_cut_cut</code>, <code>reset</code>) and Tier B (buffer/disk ops in numpy plus the stdlib <code>wave</code> module, no new dependency: <code>buffer_read_*</code>/<code>buffer_write_*</code>, <code>buffer_copy_*</code>, <code>buffer_clear*</code>, with preserve/mix crossfade, edge <code>fade_time</code> and <code>reverse</code>). Buffer ops write in place and never reallocate, so they are safe against a running audio thread; reads are non-resampling (file-rate), matching norns. Phase polling (Tier C) and the slew/routing gaps needing core changes (Tier D) are not included; see <code>docs/dev/norns-api.md</code>.</p>
+</li>
+<li>
+<p><code>softcut._wavio</code>: stdlib-<code>wave</code> WAV codec (<code>read_wav</code>, <code>read_wav_mono</code>, <code>write_wav</code>) shared by the norns layer and the demos; the demo <code>_util</code> helpers now delegate to it.</p>
+</li>
+<li>
+<p>Demo <code>12_norns_api.py</code>: a narrated progression (forward loop, low-pass, octave-down, reverse, stereo, reversed buffer copy) driven exclusively through the norns API, each feature separated by a second of silence. Renders offline or performs live with <code>--play</code>.</p>
+</li>
+<li>
+<p>Voice-to-voice feedback routing: <code>Engine.feedback(src, dst, amount)</code> mixes one voice's output into another's input (one block delayed; <code>src == dst</code> is a self-feedback delay line), plus a per-voice <code>input_gain</code> for the engine's external input.</p>
+</li>
+<li>
+<p>Lock-free single-producer/single-consumer command queue: while the device is running, voice DSP parameter changes from Python are applied on the audio thread instead of racing it. Setters apply directly when no engine is running.</p>
+</li>
+<li>
+<p>Device selection: <code>softcut.list_devices()</code> enumerates the system audio devices, and <code>Engine(output_device=..., input_device=...)</code> selects one by index (<code>-1</code> = system default).</p>
+</li>
+<li>
+<p>Release engineering: GitHub Actions CI (QA plus a Linux/macOS/Windows build smoke matrix) and a tag-triggered <code>cibuildwheel</code> workflow that builds wheels for CPython 3.10-3.14 across Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows, plus the sdist, and publishes to PyPI via trusted publishing.</p>
+</li>
+</ul>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>CMake links <code>ole32</code> on Windows (COM, used by miniaudio's WASAPI backend).</p>
+</li>
+<li>
+<p>CMake defines <code>_USE_MATH_DEFINES</code> under MSVC so <code>M_PI</code>/<code>M_PI_2</code> (used by the vendored DSP sources) are visible from <code>&lt;cmath&gt;</code>, fixing the Windows build.</p>
+</li>
+<li>
+<p>Wheels: cibuildwheel sets <code>MACOSX_DEPLOYMENT_TARGET=10.14</code> so nanobind's C++17 aligned new/delete compiles (the default x86_64 target of 10.9 fails), and the no-op <code>pp*</code> skip selector was dropped (PyPy is not enabled).</p>
+</li>
+</ul>
+<h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>Uninitialized DSP state in the vendored softcut-lib that produced nondeterministic <code>NaN</code>/denormal output (heap-garbage dependent, so it surfaced intermittently in CI):</p>
+</li>
+<li>
+<p><code>Svf</code>: <code>reset()</code> ran <code>setFc()</code>/<code>setRq()</code> before <code>setSampleRate()</code>, clamping the corner frequency against uninitialized bounds and computing coefficients from an uninitialized <code>pi_sr</code>; the corrupted <code>fc</code> was never re-clamped, yielding an unstable filter whose state diverged to <code>inf</code> and, via a zeroed output mix, <code>NaN</code>. The constructor now seeds self-consistent state.</p>
+</li>
+<li>
+<p><code>Resampler</code>: the <code>inBuf_</code>/<code>outBuf_</code> interpolation buffers were never zeroed (<code>reset()</code> is not called by the host), so the first recording <code>poke()</code> interpolated over uninitialized history and wrote garbage into the buffer. The constructor now zeroes them.</p>
+</li>
+<li>
+<p><code>ReadWriteHead</code>: added default member initializers (notably <code>buf</code>, <code>sr</code>, <code>loopFlag</code>, <code>pre</code>, <code>rec</code>, which <code>init()</code> does not set) so the head is well-defined regardless of setter call order.</p>
+</li>
+</ul>
+<h2 id="010">[0.1.0]<a class="headerlink" href="#010" title="Permanent link">&para;</a></h2>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><code>Voice</code>: nanobind binding of the complete <code>softcut::Voice</code> per-voice DSP engine. Property-style parameters (rate, loop, record/play, fades, slews, pre/post state-variable filters, phase quant/offset, rec offset), numpy <code>float32</code> buffers with power-of-two enforcement, and <code>process()</code> for offline mono block processing. Buffers are caller-owned and can be shared between voices.</p>
+</li>
+<li>
+<p><code>Engine</code>: multi-voice realtime host over a miniaudio device. Context manager (entering starts the device, exiting stops it), sequence protocol over its voices, <code>allocate()</code>, <code>sync()</code>, and an offline <code>render()</code> that shares the per-block path with the GIL-free audio callback. <code>duplex</code> (live mic in) and <code>playback</code> modes, with per-voice <code>level</code>/<code>pan</code> mixing to stereo.</p>
+</li>
+<li>
+<p>Pythonic sugar on <code>Voice</code>: <code>configure(**params)</code>, <code>loop_region</code>, the non-blocking <code>record()</code> context manager, blocking <code>record_for()</code>, and a stateful <code>__repr__</code>.</p>
+</li>
+<li>
+<p><code>next_power_of_two()</code> helper and a <code>_core.pyi</code> type stub; <code>py.typed</code> shipped.</p>
+</li>
+<li>
+<p>Demos (<code>demos/</code>): varispeed, loop points, overdub, stereo layering, filter sweep, live mic looper, Frippertronics-style overdub/replace/decay, tape-stop rate slew, pre/post filters, phase sync, and capture modes. <code>make demos</code> plays the offline demos in sequence; <code>make demo-looper</code> runs the interactive one. Audio I/O uses only the standard library plus numpy.</p>
+</li>
+</ul>
+<h3 id="changed_3">Changed<a class="headerlink" href="#changed_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>Replaced the scaffold <code>add</code>/<code>greet</code> example module with the softcut API.</p>
+</li>
+<li>
+<p><code>numpy</code> is now a runtime dependency.</p>
+</li>
+<li>
+<p>sdist force-includes the native build inputs (softcut-lib, miniaudio) so it always builds, and excludes the JACK/OSC client and demo audio fixtures.</p>
+</li>
+<li>
+<p><code>Softcut</code> is retained as a deprecated alias for <code>Engine</code>.</p>
+</li>
+</ul>
+<h3 id="fixed_2">Fixed<a class="headerlink" href="#fixed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>Vendored <code>softcut-lib</code> host-portability fixes (it relied on zero-initialized static storage that does not exist for a host-allocated <code>Voice</code>):</p>
+</li>
+<li>
+<p><code>FadeCurves</code>: default-initialize the window-ratio members read by <code>calcPreFade()</code>/<code>calcRecFade()</code> before <code>init()</code> assigns them (a garbage ratio overran a stack buffer).</p>
+</li>
+<li>
+<p><code>SubHead</code>: default-initialize <code>wrIdx_</code>/<code>active_</code> and related members so recording does not index the buffer out of bounds.</p>
+</li>
+<li>
+<p><code>TestBuffers</code>: stub out the 3 MB Matlab-dump buffer, shrinking <code>sizeof(Voice)</code> from ~3.15 MB to ~9 KB.</p>
+</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
