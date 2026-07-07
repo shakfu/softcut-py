@@ -968,13 +968,7 @@
 
 
 <h1 id="osc-server">OSC server<a class="headerlink" href="#osc-server" title="Permanent link">&para;</a></h1>
-<p><code>softcut.osc</code> exposes softcut over the same OSC wire protocol as the reference
-<a href="https://github.com/monome/softcut-lib"><code>softcut_jack_osc</code></a> client. Existing
-norns/Lua scripts, SuperCollider, Max, or any OSC controller can drive
-softcut-py as a drop-in engine over the network. It is a thin dispatch layer
-over the <a href="../../dev/norns-api/">norns host</a>: each address maps to a host
-method, with the one translation that the wire protocol is <strong>0-based</strong> (voices
-0-5, buffers 0-1) while the host is <strong>1-based</strong>.</p>
+<p><code>softcut.osc</code> exposes softcut over the same OSC wire protocol as the reference <a href="https://github.com/monome/softcut-lib"><code>softcut_jack_osc</code></a> client. Existing norns/Lua scripts, SuperCollider, Max, or any OSC controller can drive softcut-py as a drop-in engine over the network. It is a thin dispatch layer over the <a href="../../dev/norns-api/">norns host</a>: each address maps to a host method, with the one translation that the wire protocol is <strong>0-based</strong> (voices 0-5, buffers 0-1) while the host is <strong>1-based</strong>.</p>
 <h2 id="running-a-server">Running a server<a class="headerlink" href="#running-a-server" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">softcut.osc</span><span class="w"> </span><span class="kn">import</span> <span class="n">SoftcutOSC</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">softcut</span><span class="w"> </span><span class="kn">import</span> <span class="n">norns</span>
@@ -989,14 +983,11 @@ method, with the one translation that the wire protocol is <strong>0-based</stro
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>softcut.osc<span class="w"> </span>--no-audio<span class="w">      </span><span class="c1"># offline: buffer ops only, no device</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>python<span class="w"> </span>-m<span class="w"> </span>softcut.osc<span class="w"> </span>--listen-port<span class="w"> </span><span class="m">9999</span><span class="w"> </span>--reply-port<span class="w"> </span><span class="m">57120</span><span class="w"> </span>--backend<span class="w"> </span>auto
 </code></pre></div>
-<p>For background use (tests, embedding), <code>start()</code> runs the server on a background
-thread and returns immediately; <code>shutdown()</code> stops it. <code>SoftcutOSC</code> is also a
-context manager.</p>
+<p>For background use (tests, embedding), <code>start()</code> runs the server on a background thread and returns immediately; <code>shutdown()</code> stops it. <code>SoftcutOSC</code> is also a context manager.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">with</span> <span class="n">SoftcutOSC</span><span class="p">(</span><span class="n">host</span><span class="p">)</span> <span class="k">as</span> <span class="n">server</span><span class="p">:</span>      <span class="c1"># start() on enter, shutdown() on exit</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="o">...</span>
 </code></pre></div>
-<p>The server never opens the audio device itself — call <code>host.start()</code> (or use the
-command line without <code>--no-audio</code>) to go live.</p>
+<p>The server never opens the audio device itself — call <code>host.start()</code> (or use the command line without <code>--no-audio</code>) to go live.</p>
 <h2 id="transports">Transports<a class="headerlink" href="#transports" title="Permanent link">&para;</a></h2>
 <p>Two transports share one dispatch table, selected by <code>backend=</code>:</p>
 <table>
@@ -1025,39 +1016,18 @@ command line without <code>--no-audio</code>) to go live.</p>
 </tr>
 </tbody>
 </table>
-<div class="admonition warning">
-<p class="admonition-title">The native transport is experimental</p>
-<p>It is <strong>not</strong> compiled into the published wheels and must be enabled in a
-source build. It is IPv4-only and far less battle-tested than python-osc.
-Prefer python-osc unless you specifically need zero-dependency or GIL-free
-OSC control.</p>
-</div>
+<p>!!! warning "The native transport is experimental" It is <strong>not</strong> compiled into the published wheels and must be enabled in a source build. It is IPv4-only and far less battle-tested than python-osc. Prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.</p>
 <p>The native transport is compiled in with the CMake option (source build only):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">SKBUILD_CMAKE_DEFINE</span><span class="o">=</span><span class="s2">&quot;SOFTCUT_ENABLE_TINYOSC=ON&quot;</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># or, in this repo:</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>make<span class="w"> </span>build-tinyosc
 </code></pre></div>
-<p>Whether it was built is reported by <code>softcut._core.HAVE_TINYOSC</code> (and
-<code>softcut.osc.NATIVE_OSC_AVAILABLE</code>). Per-voice <code>/set/param/cut/*</code> messages are
-parsed <strong>and dispatched entirely in C, without the GIL</strong> — via a second
-single-producer command queue drained on the audio thread plus atomic parameter
-mirrors — and the phase poll runs in C too, so a busy Python interpreter can
-neither delay nor be delayed by the native control path. Other addresses (buffer
-ops, lifecycle) fall back to a Python handler.</p>
-<p>OSC is transport-bound (a socket syscall dominates each message), so this is
-about <strong>latency-jitter robustness under a busy interpreter</strong>, not raw
-throughput. <a href="https://github.com/shakfu/softcut-py/blob/main/benchmarks/osc_jitter.py"><code>benchmarks/osc_jitter.py</code></a>
-measures it: under GIL contention the native dispatch tail stays roughly flat
-(p99 ~0.08 ms) while python-osc's blows out (~7.6 ms).</p>
+<p>Whether it was built is reported by <code>softcut._core.HAVE_TINYOSC</code> (and <code>softcut.osc.NATIVE_OSC_AVAILABLE</code>). Per-voice <code>/set/param/cut/*</code> messages are parsed <strong>and dispatched entirely in C, without the GIL</strong> — via a second single-producer command queue drained on the audio thread plus atomic parameter mirrors — and the phase poll runs in C too, so a busy Python interpreter can neither delay nor be delayed by the native control path. Other addresses (buffer ops, lifecycle) fall back to a Python handler.</p>
+<p>OSC is transport-bound (a socket syscall dominates each message), so this is about <strong>latency-jitter robustness under a busy interpreter</strong>, not raw throughput. <a href="https://github.com/shakfu/softcut-py/blob/main/benchmarks/osc_jitter.py"><code>benchmarks/osc_jitter.py</code></a> measures it: under GIL contention the native dispatch tail stays roughly flat (p99 ~0.08 ms) while python-osc's blows out (~7.6 ms).</p>
 <h2 id="address-namespace">Address namespace<a class="headerlink" href="#address-namespace" title="Permanent link">&para;</a></h2>
-<p>Voice and buffer/channel indices are 0-based on the wire. Types: <code>i</code> int32,
-<code>f</code> float32, <code>s</code> string.</p>
+<p>Voice and buffer/channel indices are 0-based on the wire. Types: <code>i</code> int32, <code>f</code> float32, <code>s</code> string.</p>
 <h3 id="per-voice-parameters-setparamcutname-i-f">Per-voice parameters — <code>/set/param/cut/&lt;name&gt; i f</code><a class="headerlink" href="#per-voice-parameters-setparamcutname-i-f" title="Permanent link">&para;</a></h3>
-<p><code>rate</code>, <code>loop_start</code>, <code>loop_end</code>, <code>loop_flag</code>, <code>fade_time</code>, <code>rec_level</code>,
-<code>pre_level</code>, <code>rec_flag</code>, <code>rec_once</code>, <code>play_flag</code>, <code>rec_offset</code>, <code>position</code>,
-<code>recpre_slew_time</code>, <code>rate_slew_time</code>, <code>phase_quant</code>, <code>phase_offset</code>, and every
-<code>pre_filter_*</code> / <code>post_filter_*</code> (<code>fc</code>, <code>fc_mod</code>, <code>rq</code>, <code>lp</code>, <code>hp</code>, <code>bp</code>, <code>br</code>,
-<code>dry</code>).</p>
+<p><code>rate</code>, <code>loop_start</code>, <code>loop_end</code>, <code>loop_flag</code>, <code>fade_time</code>, <code>rec_level</code>, <code>pre_level</code>, <code>rec_flag</code>, <code>rec_once</code>, <code>play_flag</code>, <code>rec_offset</code>, <code>position</code>, <code>recpre_slew_time</code>, <code>rate_slew_time</code>, <code>phase_quant</code>, <code>phase_offset</code>, and every <code>pre_filter_*</code> / <code>post_filter_*</code> (<code>fc</code>, <code>fc_mod</code>, <code>rq</code>, <code>lp</code>, <code>hp</code>, <code>bp</code>, <code>br</code>, <code>dry</code>).</p>
 <p>Two multi-argument params:</p>
 <table>
 <thead>
@@ -1174,8 +1144,7 @@ measures it: under GIL contention the native dispatch tail stays roughly flat
 </tr>
 </tbody>
 </table>
-<p>Trailing arguments on the buffer read/write messages are optional and fall back
-to their defaults, matching the reference.</p>
+<p>Trailing arguments on the buffer read/write messages are optional and fall back to their defaults, matching the reference.</p>
 <h3 id="lifecycle-and-polls">Lifecycle and polls<a class="headerlink" href="#lifecycle-and-polls" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1214,32 +1183,27 @@ to their defaults, matching the reference.</p>
 </tbody>
 </table>
 <h2 id="phase-poll">Phase poll<a class="headerlink" href="#phase-poll" title="Permanent link">&para;</a></h2>
-<p>While the phase poll is running, a background thread scans each voice's quantized
-phase and sends, whenever it changes:</p>
+<p>While the phase poll is running, a background thread scans each voice's quantized phase and sends, whenever it changes:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/poll/softcut/phase &lt;voice:i&gt; &lt;phase:f&gt;      # to reply_host:reply_port
 </code></pre></div>
-<p>Set <code>phase_quant</code> (and optionally <code>phase_offset</code>) per voice to control the
-quantization. Replies go to <code>reply_host:reply_port</code> (default <code>127.0.0.1:57120</code>,
-SuperCollider's <code>sclang</code> port, as in the reference). With the native backend the
-poll loop also runs in C (<code>_core._OscPhasePoll</code>), so it holds no GIL.</p>
+<p>Set <code>phase_quant</code> (and optionally <code>phase_offset</code>) per voice to control the quantization. Replies go to <code>reply_host:reply_port</code> (default <code>127.0.0.1:57120</code>, SuperCollider's <code>sclang</code> port, as in the reference). With the native backend the poll loop also runs in C (<code>_core._OscPhasePoll</code>), so it holds no GIL.</p>
 <h2 id="standalone-server-no-python">Standalone server (no Python)<a class="headerlink" href="#standalone-server-no-python" title="Permanent link">&para;</a></h2>
-<p>For a headless, interpreter-free deployment, the repo also builds a standalone
-native binary (<code>clients/softcut-osc</code>, <code>make build-standalone</code>) that speaks this
-same protocol with no CPython at all — the pure-C++ counterpart to <code>softcut.osc</code>,
-sharing its Python-free core (mixer, device, sockets) under <code>src/shared</code>. It adds
-WAV disk I/O via the vendored dr_wav on a disk-worker thread with crossfades,
-<code>preserve</code>/<code>mix</code> blending, opt-in <code>--resample-on-read</code>, and device selection. See
-<a href="https://github.com/shakfu/softcut-py/blob/main/clients/softcut-osc/README.md"><code>clients/softcut-osc/README.md</code></a>.</p>
+<p>For a headless, interpreter-free deployment, the repo also builds a standalone native binary (<code>clients/softcut-osc</code>, <code>make build-standalone</code>) that speaks this same protocol with no CPython at all — the pure-C++ counterpart to <code>softcut.osc</code>, sharing its Python-free core (mixer, device, sockets) under <code>src/shared</code>. It adds WAV disk I/O via the vendored dr_wav on a disk-worker thread with crossfades, <code>preserve</code>/<code>mix</code> blending, opt-in <code>--resample-on-read</code>, and device selection. See <a href="https://github.com/shakfu/softcut-py/blob/main/clients/softcut-osc/README.md"><code>clients/softcut-osc/README.md</code></a>.</p>
 <h2 id="known-partials">Known partials<a class="headerlink" href="#known-partials" title="Permanent link">&para;</a></h2>
 <p>These mirror the norns layer's gaps rather than the OSC layer inventing new ones:</p>
 <ul>
-<li><code>/set/enabled/cut</code> — the core has no per-voice idle-disable; it is approximated
-  with the play flag.</li>
-<li><code>/set/level/in_cut</code> — the core has a single scalar input gain per voice (mono
-  duplex), not a per-channel ADC matrix, so the input channel index is ignored.</li>
-<li><code>level_slew_time</code> / <code>pan_slew_time</code> — per-sample DSP slews softcut-lib supports
-  but the binding does not yet expose; accepted-and-ignored.</li>
-<li><code>/poll/*/vu</code> — no VU meter (also dead code in the reference client).</li>
+<li>
+<p><code>/set/enabled/cut</code> — the core has no per-voice idle-disable; it is approximated with the play flag.</p>
+</li>
+<li>
+<p><code>/set/level/in_cut</code> — the core has a single scalar input gain per voice (mono duplex), not a per-channel ADC matrix, so the input channel index is ignored.</p>
+</li>
+<li>
+<p><code>level_slew_time</code> / <code>pan_slew_time</code> — per-sample DSP slews softcut-lib supports but the binding does not yet expose; accepted-and-ignored.</p>
+</li>
+<li>
+<p><code>/poll/*/vu</code> — no VU meter (also dead code in the reference client).</p>
+</li>
 </ul>
 
 

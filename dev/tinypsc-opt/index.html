@@ -901,8 +901,12 @@
 <h3 id="measured-it-holds-up-under-a-busy-interpreter">Measured: it holds up under a busy interpreter<a class="headerlink" href="#measured-it-holds-up-under-a-busy-interpreter" title="Permanent link">&para;</a></h3>
 <p><code>benchmarks/osc_jitter.py</code> quantifies the win while a background thread hogs the GIL. It reports <strong>two</strong> latencies per message, so the observer confound is measured rather than assumed:</p>
 <ul>
-<li><strong>dispatch-only</strong> - send to the apply instant recorded <em>in C</em> by an apply-latency probe (<code>_bench_last_apply_ns</code>), stamped on whichever thread applied the value. This excludes the Python observer and is the true control-to-audio proxy.</li>
-<li><strong>end-to-end</strong> - send to when a Python poller <em>sees</em> the value; its poll needs the GIL, so this carries the observer's own GIL wait.</li>
+<li>
+<p><strong>dispatch-only</strong> - send to the apply instant recorded <em>in C</em> by an apply-latency probe (<code>_bench_last_apply_ns</code>), stamped on whichever thread applied the value. This excludes the Python observer and is the true control-to-audio proxy.</p>
+</li>
+<li>
+<p><strong>end-to-end</strong> - send to when a Python poller <em>sees</em> the value; its poll needs the GIL, so this carries the observer's own GIL wait.</p>
+</li>
 </ul>
 <p>Both come from one <code>steady_clock</code>, so end-to-end minus dispatch-only <em>is</em> the observer's contribution. The probe publishes the applied value with release and the poll acquires it, so the timestamp always belongs to that apply (no stale/negative samples). Representative run (2000 samples, 0.5 ms switch interval, macOS, p99):</p>
 <table>
