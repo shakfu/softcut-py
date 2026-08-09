@@ -169,6 +169,50 @@ def test_position_advances():
     assert v.position != start
 
 
+def test_quant_phase_starts_at_zero_on_a_dirty_heap():
+    """A voice reports a real phase before the audio thread has written one.
+
+    `quantPhase` and `phaseQuant` in the vendored softcut-lib used to be left
+    uninitialized -- softcut assumes zeroed static storage, which a host
+    allocation does not give it -- so a freshly constructed voice read whatever
+    the recycled block held, and `updateQuantPhase` divided by a garbage
+    quantum. The garbage only appears once the allocator has dirty blocks to
+    hand back, hence the churn first.
+    """
+    churn = [np.full(1 << 16, 0xFF, dtype=np.uint8) for _ in range(64)]
+    for used in churn:
+        used[:] = 0xFF
+    del churn
+
+    for _ in range(8):
+        voice = Voice(SR)
+        assert voice.quant_phase == 0.0
+        assert voice.position == 0.0
+
+
+def test_reset_restores_the_reported_phase():
+    """reset() puts the phase mirrors back, so a reset voice is not still there."""
+    v, _ = make_voice()
+    v.phase_quant = 0.25
+    v.play = True
+    v.process(np.zeros(1 << 15, dtype=np.float32))
+    assert v.quant_phase > 0.0  # the head moved and the poll would report it
+
+    v.reset()
+    assert v.quant_phase == 0.0
+
+
+def test_quant_phase_tracks_the_quantum():
+    """With a quantum set, the reported phase is a multiple of it."""
+    v, _ = make_voice()
+    v.phase_quant = 0.1
+    v.play = True
+    v.process(np.zeros(int(0.45 * SR), dtype=np.float32))
+    quantized = v.quant_phase
+    assert quantized == pytest.approx(0.4, abs=1e-6)
+    assert quantized <= v.position
+
+
 def test_actions_do_not_raise():
     v, _ = make_voice()
     v.play = True

@@ -50,6 +50,17 @@ void Voice::reset() {
 
     sch.setRecOffsetSamples(-8);
 
+    // Restore the phase state too, so a reset voice reports where it now is
+    // rather than where it was, and so the defaults the host advertises for
+    // these two are the ones reset() actually establishes. Assigned rather than
+    // set through setPhaseOffset(), which scales by sampleRate -- not yet set
+    // when the constructor calls reset(), and a garbage sampleRate of inf or
+    // NaN would survive the multiply by zero.
+    phaseQuant = 0;
+    phaseOffset = 0;
+    rawPhase.store(0, std::memory_order_relaxed);
+    quantPhase.store(0, std::memory_order_relaxed);
+
     recFlag = false;
     playFlag = false;
 

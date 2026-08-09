@@ -150,6 +150,10 @@ make build-standalone                    # -> build/softcut-osc/softcut-osc
 
 The Python extension and this binary share their Python-free C++ core (command queue, mixer, device, sockets) under `src/shared`. See [`clients/softcut-osc/README.md`](clients/softcut-osc/README.md).
 
+### TouchOSC surface
+
+[`clients/touchosc`](clients/touchosc/) holds a TouchOSC layout, `softcut.tosc`, that plays either server over the wire protocol: a mixer strip per voice, tabular pages for the loop, record and filter parameters, the feedback and voice-sync matrices, buffer and disk operations, and a receive-only phase readout fed by the phase poll. It is generated from Python with [py2tosc](https://pypi.org/project/py2tosc/) rather than drawn by hand, so `make touchosc` rebuilds it for a different canvas, voice count or parameter range, and the test suite pushes every binding in it through the server's own dispatch table.
+
 ## Build and test
 
 ```bash
@@ -168,4 +172,4 @@ CI runs QA and a Linux/macOS/Windows build smoke on every push and pull request.
 
 - Realtime parameter updates are safe: while the device is running, voice DSP parameter changes from Python are enqueued and applied on the audio thread via a lock-free queue rather than racing it. (The mix scalars `level`/`pan`/ `input_gain` and the feedback matrix are plain aligned writes.)
 
-- The vendored `softcut-lib` carries small host-portability fixes (uninitialized members that relied on embedded zero-init static storage, and an oversized debug buffer stubbed out); see the comments in `thirdparty/softcut-lib`.
+- The vendored `softcut-lib` carries small host-portability fixes (uninitialized members that relied on embedded zero-init static storage — including the phase quantum and the two phase mirrors the poll reports from — and an oversized debug buffer stubbed out); see the comments in `thirdparty/softcut-lib`.

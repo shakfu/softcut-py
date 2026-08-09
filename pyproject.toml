@@ -40,6 +40,9 @@ dev = [
     "ruff>=0.14.9",
     "twine>=6.2.0",
     "python-osc>=1.8",
+    # Builds the TouchOSC surface in clients/touchosc; tests/test_touchosc.py
+    # checks the generated layout against the OSC server's dispatch table.
+    "py2tosc>=0.3.2",
 ]
 docs = [
     "mkdocs>=1.6",

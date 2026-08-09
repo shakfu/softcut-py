@@ -1188,6 +1188,15 @@ wheels = [
 ]
 
 [[package]]
+name = "py2tosc"
+version = "0.3.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/aa/05a564c620fae03e1ba9a7f6aea5b5833b48ac39e4f06689bea341c5cec6/py2tosc-0.3.2.tar.gz", hash = "sha256:a9acd27d95210e22cfc906db4fef13a42681e3d37f687c0d69448cd8e74c6094", size = 67654, upload-time = "2026-08-07T20:40:46.807Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/48/92/0cab1f75ef5376a5d70df84c7731f714e68e0e5de0d72c4e2cd352d29186/py2tosc-0.3.2-py3-none-any.whl", hash = "sha256:b1d3206d09248e13b3be99e1d2e0227879890a30067829d2d4ac12742879666f", size = 63307, upload-time = "2026-08-07T20:40:45.542Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1484,6 +1493,7 @@ osc = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "py2tosc" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "python-osc" },
@@ -1505,6 +1515,7 @@ provides-extras = ["osc"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.19.1" },
+    { name = "py2tosc", specifier = ">=0.3.2" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "python-osc", specifier = ">=1.8" },

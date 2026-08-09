@@ -229,6 +229,39 @@ def test_phase_poll_emits_on_change(backend):
         receiver.server_close()
 
 
+def test_phase_poll_survives_a_failing_send():
+    """A send that raises must not take the poll thread down with it.
+
+    Nothing restarts the thread, so an exception escaping the loop would end
+    phase reporting for the life of the process. The failure is counted and the
+    scan keeps running.
+    """
+
+    class Failing:
+        def __init__(self):
+            self.attempts = 0
+
+        def send_message(self, address, args):
+            self.attempts += 1
+            raise OverflowError("float too large to pack with f format")
+
+    host = NornsSoftcut(sample_rate=SR, buffer_frames=2**16, mode="playback")
+    client = Failing()
+    poll = osc._PhasePoll(host, client, period=0.001)
+    poll.start()
+    try:
+        assert wait_until_pred(lambda: poll.errors >= 3)
+        assert poll.running  # still scanning after repeated failures
+        assert client.attempts >= 3
+    finally:
+        poll.stop()
+
+    # poll_once itself still raises, for callers driving it by hand.
+    poll.reset()
+    with pytest.raises(OverflowError):
+        poll.poll_once()
+
+
 def wait_until_pred(pred, timeout=2.0, interval=0.01):
     end = time.time() + timeout
     while time.time() < end:

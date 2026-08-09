@@ -138,15 +138,26 @@ namespace softcut {
         float svfPreFcMod = 1.0;
         float svfPreDryLevel = 1.0;
         float svfPostDryLevel = 1.0;
+        // NB: like SubHead's, these members are default-initialized because
+        // softcut relies on zero-initialized static storage on embedded
+        // targets. reset() did not set them either, so on a host a
+        // heap-allocated Voice began with a garbage phaseQuant -- which
+        // updateQuantPhase() divides by, taking the quantizing branch instead
+        // of the phaseQuant == 0 one -- and with garbage in the two phase
+        // mirrors, which non-audio threads read before the first block is
+        // processed. Both reach a host as a nonsense quantized phase: the OSC
+        // phase poll reports it, and a value beyond float range aborts the
+        // send outright.
+        //
         // phase quantization unit, should be in [0,1]
-        phase_t phaseQuant;
+        phase_t phaseQuant = 0;
         // phase offset in sec
         float phaseOffset = 0;
-	
+
 	//-- these stored phases are for access from non-audio threads,
 	// and are updated once per block:
-	std::atomic<phase_t> rawPhase;
-        std::atomic<phase_t> quantPhase;
+	std::atomic<phase_t> rawPhase{0};
+        std::atomic<phase_t> quantPhase{0};
 
     private:
 

@@ -4,7 +4,7 @@
 # This Makefile wraps common build commands for convenience.
 # The actual build is handled by scikit-build-core via pyproject.toml
 
-.PHONY: all sync build rebuild build-tinyosc build-bench build-standalone test-standalone test lint format typecheck qa demos demo-looper clean         distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
+.PHONY: all sync build rebuild build-tinyosc build-bench build-standalone test-standalone touchosc test lint format typecheck qa demos demo-looper clean        distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
 
 # Default target
 all: build
@@ -38,6 +38,10 @@ build-standalone:
 # in the server).
 test-standalone: build-standalone
 	@python3 clients/softcut-osc/test_smoke.py
+
+# Regenerate the TouchOSC control surface (clients/touchosc) with py2tosc.
+touchosc:
+	@uv run python clients/touchosc/build_layout.py
 
 # Run tests
 test:

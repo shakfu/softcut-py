@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `clients/touchosc`: a TouchOSC control surface (`softcut.tosc`) covering the OSC namespace across eight pages — a mixer strip per voice, tabular loop/record/pre-filter/post-filter tables, the cut-to-cut feedback and voice-sync matrices, buffer and disk operations, and a receive-only phase readout driven by the phase poll. Every control sends a real address, with the voice index as a constant integer argument and the control's value scaled into the parameter's range; indices are 0-based on the wire and 1-based in the captions, as the protocol and norns respectively have them. Persistent state gets a fader or a latching toggle, one-shot commands (voice sync, buffer assignment, reset, disk I/O) get a momentary button, and the sync diagonal is a blank because syncing a voice to itself does nothing.
+
+  Controls open at the values a freshly reset voice actually holds — level at unity, pan centred, rate at 1, the pre-filter low-passed and the post-filter dry — so the surface agrees with the engine before anything is touched; TouchOSC transmits nothing on load, so these are a display and not a preset. Each filter's cutoff fader spans up to that filter's own default (16 kHz pre, 12 kHz post), and the `rq` rows are captioned `low = resonant` since rq is reciprocal Q and tames the filter as it rises. Bindings are on TouchOSC connection 1 alone rather than all ten slots, so a second OSC destination added later receives nothing from this surface.
+
+  Calibrated to softcut-py's conventions, which the standalone `clients/softcut-osc` binary shares but softcut-lib's own `softcut_jack_osc` demo client does not: its pan is `0..1` rather than `-1..1`, and it resets output level to `0` and `phase_quant` to `1`.
+
+- `make touchosc`: the surface is generated rather than drawn, by `clients/touchosc/build_layout.py` with [py2tosc](https://pypi.org/project/py2tosc/) (a new dev dependency), so it can be reshaped for a different canvas, voice count, time range or disk paths by rerunning it. It also writes `softcut.xml`, TouchOSC's readable export, for inspecting what a control carries; that one is git-ignored at ~2 MB, and `--no-xml` skips it. `tests/test_touchosc.py` pulls every binding out of the layout, synthesises the message TouchOSC would send at both ends of each control's travel, and pushes it through the OSC server's own dispatch table — catching address drift in either direction, and checking that replaying a fader at its resting position leaves a fresh voice untouched.
+
+- `softcut.osc._PhasePoll.errors`: how many scans have failed since the poll was last started.
+
+### Fixed
+
+- A further vendored `softcut-lib` host-portability fix, of the same family as 0.2.0's: uninitialized phase state on `Voice`. `Voice::phaseQuant`, `Voice::rawPhase` and `Voice::quantPhase` had no initializer and `Voice::reset()` did not set them — softcut assumes zero-initialized static storage, which a heap-allocated voice on a host does not get. A fresh voice therefore reported whatever the recycled allocation held, and `updateQuantPhase()` took its quantizing branch and divided by a garbage quantum. Reaching a host, that is a nonsense playhead position from `Voice.quant_phase` and `/poll/softcut/phase`, and a value beyond float range kills the python-osc phase-poll thread outright (`OverflowError` in `struct.pack`). `reset()` now restores the phase state too, so a reset voice reports where it is rather than where it was, and the defaults the extension advertises for `phase_quant`/`phase_offset` are the ones `reset()` actually establishes. Affects the standalone `clients/softcut-osc` binary equally; rebuild it with `make build-standalone` to pick the fix up.
+
+- The Python phase poll (`softcut.osc._PhasePoll`) no longer dies on a failed scan. Nothing restarts its thread, so one exception escaping the loop ended phase reporting for the life of the process; failures are now logged once with a traceback, counted on `errors`, and the scan continues. A voice's last-reported phase is recorded only after its send succeeds, so a failed scan retries rather than dropping the update it never managed to report. `poll_once` still raises, for callers driving it directly. (The native backend's poll runs in C and is unaffected.)
+
 ## [0.3.0]
 
 ### Added

@@ -110,6 +110,7 @@ class _PhasePoll:
         self._last: list[Optional[float]] = [None] * self._n
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._errors = 0
 
     def poll_once(self) -> None:
         """Scan all voices once, emitting a message for each changed phase."""
@@ -117,8 +118,11 @@ class _PhasePoll:
         for i in range(self._n):
             phase = float(eng[i].quant_phase)
             if phase != self._last[i]:
-                self._last[i] = phase
+                # Recorded only once the send has gone out, so a scan that
+                # fails retries that voice rather than dropping the update it
+                # never managed to report.
                 self._client.send_message(self.ADDRESS, [i, phase])
+                self._last[i] = phase
 
     def reset(self) -> None:
         """Clear change detection so the next poll re-emits every voice."""
@@ -129,6 +133,7 @@ class _PhasePoll:
             return
         self._stop.clear()
         self._last = [None] * self._n
+        self._errors = 0
         self._thread = threading.Thread(
             target=self._run, name="softcut-osc-phase", daemon=True
         )
@@ -145,9 +150,27 @@ class _PhasePoll:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    @property
+    def errors(self) -> int:
+        """How many scans have failed since the poll was last started."""
+        return self._errors
+
     def _run(self) -> None:
         while not self._stop.is_set():
-            self.poll_once()
+            try:
+                self.poll_once()
+            except Exception:
+                # Nothing restarts this thread, so an exception escaping here
+                # would end phase reporting for the life of the process -- and
+                # a transient one (an unroutable reply address, a socket
+                # hiccup) is not worth that. The first is logged with its
+                # traceback and the rest are counted, so a persistent fault
+                # stays visible through ``errors`` without flooding the log.
+                # ``poll_once`` itself still raises, for callers driving it
+                # directly.
+                self._errors += 1
+                if self._errors == 1:
+                    _log.exception("phase poll failed; further errors suppressed")
             self._stop.wait(self._period)
 
 
