@@ -35,6 +35,7 @@ from typing import Any
 
 from softcut._core import Voice, _Engine
 from softcut._core import list_devices as _list_devices
+from softcut._wavio import read_wav, read_wav_mono, write_wav
 
 
 def _zeros(n: int) -> array.array:
@@ -63,8 +64,17 @@ def _samples(buffer: Any) -> int:
     return int(view.nbytes // view.itemsize)
 
 
-__all__ = ["Voice", "Engine", "Softcut", "next_power_of_two", "list_devices"]
-__version__ = "0.4.0"
+__all__ = [
+    "Voice",
+    "Engine",
+    "Softcut",
+    "next_power_of_two",
+    "list_devices",
+    "read_wav",
+    "read_wav_mono",
+    "write_wav",
+]
+__version__ = "0.4.1"
 
 
 def list_devices() -> list[dict]:
@@ -337,26 +347,65 @@ class Engine(Sequence[Voice]):
         self._core.set_feedback(src, dst, float(amount))
         return self
 
-    def render(self, input: Any, out: Any = None) -> Any:
+    def render(
+        self, input: Any = None, out: Any = None, *, seconds: float | None = None
+    ) -> Any:
         """Offline: process a mono input block through all voices.
 
-        ``input`` is any 1-D C-contiguous float32 buffer of mono samples -- an
-        ``array.array``, a ``memoryview``, or a numpy array. The mixed output is
-        written into ``out`` and returned; omit it and a zeroed
-        ``array.array("f")`` of ``n * out_channels`` samples is allocated for
-        you. Frames are interleaved, so ``numpy.asarray(out).reshape(-1,
+        Give it either ``input`` -- any 1-D C-contiguous float32 buffer, which is
+        what the voices record -- or ``seconds``, which feeds them that much
+        silence. The second is what most offline work wants: there is nothing to
+        record, the voices are playing material already in their buffers, and an
+        input buffer of zeros is pure ceremony.
+
+        The mixed output is written into ``out`` and returned; omit it and a
+        zeroed ``array.array("f")`` of ``n * out_channels`` samples is allocated
+        for you. Frames are interleaved, so ``numpy.asarray(out).reshape(-1,
         engine.out_channels)`` is the 2-D view, taken without copying.
 
-        Raises if the device is running (use the live path then, not render).
+        Head positions persist across calls, so successive renders concatenate
+        into continuous audio.
+
+        Raises:
+            RuntimeError: If the device is running -- use the live path then.
+            ValueError: If neither or both of ``input`` and ``seconds`` is given.
         """
         if self.running:
             raise RuntimeError(
                 "cannot render() while the device is running; stop() first"
             )
+        if (input is None) == (seconds is None):
+            raise ValueError("provide exactly one of input or seconds")
+        if seconds is not None:
+            input = _zeros(int(round(float(seconds) * self._sample_rate)))
         n = _samples(input)
         if out is None:
             out = _zeros(n * self.out_channels)
         return self._core.render(input, out)
+
+    def render_to(
+        self,
+        path: Any,
+        input: Any = None,
+        out: Any = None,
+        *,
+        seconds: float | None = None,
+    ) -> Any:
+        """Render and write the result to a 16-bit PCM WAV. Returns the path.
+
+        Takes ``input`` or ``seconds`` exactly as `render` does, and supplies the
+        writer with the sample rate and channel count the engine already knows:
+
+        ```python
+        eng.render_to("out.wav", seconds=4)
+        ```
+
+        ``out`` is passed through, so a loop can reuse one buffer.
+        """
+        frames = self.render(input, out, seconds=seconds)
+        return write_wav(
+            path, frames, int(self._sample_rate), channels=self.out_channels
+        )
 
     def start(self) -> Engine:
         """Open (if needed) and start the audio device. Non-blocking."""

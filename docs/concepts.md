@@ -5,6 +5,8 @@
 A [`Voice`](api.md#voice) wraps one `softcut::Voice`: a crossfading read/write head over an audio buffer. It is the unit of sound. Parameters are plain attributes — setting one takes effect on the next processed block:
 
 ```python
+import softcut
+
 v = softcut.Voice(sample_rate=48000)
 v.rate = 2.0          # octave up, half loop time
 v.loop_region = (0, 4)
@@ -15,7 +17,7 @@ A voice is mono. Stereo output comes from the engine mixing several voices via t
 
 ## Buffers
 
-softcut-lib **owns no buffer memory** — a voice's buffer is a `float32` buffer that *you* own and assign. Anything C-contiguous will do, so the standard library is enough and numpy is welcome:
+softcut-lib **owns no buffer memory** — a voice's buffer is `float32` memory that *you* own and assign. The interface is the buffer protocol, so anything C-contiguous will do: the standard library is enough, and numpy is welcome.
 
 ```python
 import array
@@ -24,6 +26,28 @@ v.buffer = array.array("f", bytes(4 * 2**16))
 import numpy as np                              # equally fine
 v.buffer = np.zeros(2**16, dtype=np.float32)
 ```
+
+The buffer is **stored, not copied**. `v.buffer` hands back the very object you
+assigned, and the audio thread records into that memory:
+
+```python
+import array
+
+buf = array.array("f", bytes(4 * 2**16))
+v.buffer = buf
+v.buffer is buf                                 # True -- no copy was taken
+```
+
+That is what makes it possible to watch a recording arrive, or to prepare
+material and have a voice play it without handing anything back. It is also why
+writing *into* the array is safe while audio runs, and **re**assigning
+`v.buffer` is not: the first changes samples the head is already reading, the
+second swaps the pointer underneath it.
+
+What softcut allocates for you — [`Engine.allocate`](api.md#engine), and
+`NornsSoftcut.buffers` in the [norns layer](guide/norns.md) — is an
+`array.array("f")`. numpy wraps one without copying, so
+`numpy.asarray(buf)` is a writable view rather than a conversion.
 
 Two constraints follow from the DSP:
 

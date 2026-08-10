@@ -26,16 +26,16 @@ This is **not** a port of the norns Lua API. It exposes softcut as Python object
 === "Offline rendering"
 
     ```python
-    import numpy as np, softcut
+    import array, softcut
 
     eng = softcut.Engine(voices=1, mode="playback")
-    v = eng[0]
-    v.buffer = np.zeros(2**16, dtype=np.float32)
-    v.configure(loop_region=(0, 1), rate=1.0)
-    v.rec = v.play = True
-    v.cut_to(0)
+    eng.allocate(seconds=2)
+    eng[0].configure(loop_region=(0, 1), rate=1.0, rec_level=1.0)
+    eng[0].rec = eng[0].play = True
+    eng[0].cut_to(0)
 
-    out = eng.render(np.random.randn(48000).astype(np.float32))   # (48000, 2) float32
+    # two laps: the first records the input, the second plays it back
+    eng.render_to("out.wav", array.array("f", [0.3] * 96000))
     ```
 
 ## Highlights
@@ -50,6 +50,7 @@ This is **not** a port of the norns Lua API. It exposes softcut as Python object
 
 - [Device selection](guide/devices.md) and a numpy-native buffer model.
 
+- Port norns scripts through the [norns-compatible layer](guide/norns.md), which mirrors the flat Lua API.
 - Drive it from any controller over the [OSC server](guide/osc.md) — a dependency-free GIL-free native transport built in by default, and a standalone, no-Python OSC server binary (`make build-standalone`).
 
 Start with [Installation](installation.md) and [Concepts](concepts.md).

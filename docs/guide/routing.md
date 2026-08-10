@@ -1,5 +1,14 @@
 # Routing & feedback
 
+The examples below share one engine:
+
+```python
+import softcut
+
+eng = softcut.Engine(voices=2, mode="playback")
+eng.allocate(seconds=4)
+```
+
 ## Output mix: level and pan
 
 Each voice mixes to the stereo output through its `level` (linear gain) and `pan` (`-1` left, `0` center, `+1` right, equal-power):

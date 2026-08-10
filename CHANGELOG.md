@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1]
+
+### Added
+
+- `seconds=` on `NornsSoftcut.render` as well, mirroring `Engine.render`. The norns guide documented it before it existed.
+
+- `docs/guide/norns.md`: a user-facing page for the norns-compatible layer, which was a headline feature with only a developer design note behind it. Covers the import idiom, every parameter and buffer function, the start/stop/render departure from norns (whose audio always runs), and what is deliberately absent — phase polling, the two slews, the ADC matrix. It also writes down the trap that a loop does not loop until a head is cut into it with `position()`.
+
+- `seconds=` on `Engine.render` and `render_to`, as an alternative to an input buffer: the engine knows its own sample rate, so `eng.render_to("out.wav", seconds=4)` needs nothing constructed to hand it. Most offline work is playing material already in the buffers, where an input of zeros was pure ceremony -- `demos/_util.py` had carried its own `render_seconds` helper for that reason since the first demo, and now delegates. Exactly one of `input`/`seconds` is required, as with `allocate`.
+
+- `Engine.render_to(path, input=None, *, seconds=None)`: render a block and write it to a 16-bit PCM WAV in one call, taking the sample rate and channel count from the engine rather than from the caller. Those two were exactly what an offline render kept having to restate, and a wrong channel count writes a file of the wrong length rather than failing.
+
+- `softcut.write_wav`, `softcut.read_wav` and `softcut.read_wav_mono` are public. They were private in `softcut._wavio` while backing the norns layer and every demo, so the documented way to get audio to disk went through numpy while the built-in answer sat behind an underscore.
+
+### Fixed
+
+- Every Python block in the README and `docs/` was extracted and executed; 34 of 42 run, and the 8 that do not are signature displays, REPL transcripts, the `soundfile` example and the design note's pre-implementation sketch. That turned up: `docs/guide/offline-rendering.md` claiming `render` returns `shape (48000, 2)` and `Voice.process` a `shape (1024,)` array, both stale since those return flat buffers; a `silence(0.1)` and a `to_power_of_two(...)` that look like API and are not; an `sf.write` handed interleaved frames without the reshape; `docs/index.md` carrying the old silent render example; and pages whose first block used `softcut`, `eng` or `time` without importing or creating them.
+
+- The README's offline-rendering example never made a sound. It rendered exactly one lap of its loop with `rec_level` at its default of 0, and a lap reads before it writes, so the output was silence whichever way you looked at it. It now records one lap and plays it back on the next, and the example is run verbatim as part of checking this release.
+
+- Both norns and OSC examples in the README set a loop and pressed play without ever cutting a head into it, so anyone copying them heard the material run past `loop_end` and stop. They call `position` now, and the surrounding text says why.
+
 ## [0.4.0]
 
 ### Added

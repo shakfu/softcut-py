@@ -21,6 +21,8 @@ The `index` is per-type: playback devices are indexed separately from capture de
 Pass the index of the matching type to the engine; `-1` (the default) means the system default device:
 
 ```python
+import softcut
+
 eng = softcut.Engine(
     mode="duplex",
     output_device=1,   # second playback device

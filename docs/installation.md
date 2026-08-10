@@ -16,9 +16,9 @@ There are **no dependencies**, numpy included. One optional extra is available:
 pip install softcut-py[osc]     # the pure-Python OSC transport (python-osc)
 ```
 
-Buffers are `array.array("f")` and every entry point takes any C-contiguous
-float32 buffer, so numpy arrays work wherever you care to use them, and
-`numpy.asarray` wraps what softcut returns without copying.
+Buffers are any buffer-protocol object -- `array.array("f")` from the standard
+library, or a numpy array if you already use one. What softcut allocates for you
+is `array.array("f")`, which `numpy.asarray` wraps without copying.
 
 ## From source
 

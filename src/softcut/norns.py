@@ -414,9 +414,15 @@ class NornsSoftcut:
         self._eng.stop()
         return self
 
-    def render(self, input: Any, out: Any = None) -> Any:
-        """Offline: process a mono input block through all voices."""
-        return self._eng.render(input, out)
+    def render(
+        self, input: Any = None, out: Any = None, *, seconds: float | None = None
+    ) -> Any:
+        """Offline: process a mono input block through all voices.
+
+        Takes ``input`` or ``seconds`` exactly as :meth:`softcut.Engine.render`
+        does; norns has no equivalent, since its audio always runs.
+        """
+        return self._eng.render(input, out, seconds=seconds)
 
 
 def _make_float_setter(attr: str):

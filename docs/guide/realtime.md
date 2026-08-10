@@ -15,6 +15,8 @@ While the device is **running**, a voice's DSP parameter change from Python is n
 This covers the softcut DSP parameters (rate, loop, record/play, fades, slews, filters, phase, `cut_to`, `stop`, `reset`). The engine-mix scalars (`level`, `pan`, `input_gain`) and the feedback matrix are plain aligned writes — a concurrent read is at worst stale by one block, which is inaudible.
 
 ```python
+import softcut, time
+
 with softcut.Engine(voices=1) as eng:
     eng.allocate(seconds=4)
     eng[0].configure(loop_region=(0, 4))

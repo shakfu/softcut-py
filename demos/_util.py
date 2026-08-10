@@ -45,21 +45,21 @@ def to_buffer(samples: np.ndarray) -> np.ndarray:
 def render_seconds(
     engine: softcut.Engine, seconds: float, input: np.ndarray | None = None
 ) -> np.ndarray:
-    """Render ``seconds`` of output. ``input`` (mono) defaults to silence.
+    """``seconds`` of output as a 2-D numpy view. ``input`` defaults to silence.
 
-    Voice head positions persist across calls, so several renders concatenate
-    into continuous audio.
+    `Engine.render` does the work, including the silent input; this trims or pads
+    a supplied one to length and takes the 2-D view the demos are written
+    against. Voice head positions persist across calls, so several renders
+    concatenate into continuous audio.
     """
     n = int(round(seconds * engine.sample_rate))
     if input is None:
-        input = np.zeros(n, dtype=np.float32)
+        out = engine.render(seconds=seconds)
     else:
         input = np.asarray(input, dtype=np.float32)[:n]
         if len(input) < n:
             input = np.concatenate([input, np.zeros(n - len(input), dtype=np.float32)])
-    # render() hands back a flat interleaved buffer; the demos are numpy code,
-    # so this is the one place the 2-D view is taken (without copying).
-    out = engine.render(input)
+        out = engine.render(input)
     return np.asarray(out).reshape(-1, engine.out_channels)
 
 

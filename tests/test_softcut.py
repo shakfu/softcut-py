@@ -386,6 +386,80 @@ def test_engine_allocate_per_voice():
     assert bufs[0] is not bufs[1]
 
 
+def test_render_to_writes_a_wav_the_engine_describes(tmp_path):
+    """render_to takes the sample rate and channel count from the engine.
+
+    Those two are exactly what a caller kept having to restate, and getting
+    `channels` wrong writes a file of the wrong length rather than failing.
+    """
+    eng = Engine(voices=1, sample_rate=SR, mode="playback")
+    eng[0].buffer = sine_buffer()  # play existing material: a read lap needs no
+    eng[0].configure(loop_region=(0, 1), rate=1.0)  # prior record lap to sound
+    eng[0].play = True
+    eng[0].cut_to(0.0)
+
+    path = eng.render_to(tmp_path / "out.wav", np.zeros(4096, dtype=np.float32))
+
+    data, channels, sr = softcut.read_wav(path)
+    assert channels == eng.out_channels
+    assert sr == int(SR)
+    assert len(data) == 4096 * eng.out_channels
+    assert max(abs(x) for x in data) > 0.0
+
+
+def test_render_takes_seconds_instead_of_a_silent_input():
+    """`seconds` is the common offline case: play material, feed nothing in."""
+
+    def fresh():
+        eng = Engine(voices=1, sample_rate=SR, mode="playback")
+        eng[0].buffer = sine_buffer()
+        eng[0].configure(loop_region=(0, 1), rate=1.0)
+        eng[0].play = True
+        eng[0].cut_to(0.0)
+        return eng
+
+    # A separate engine each time: filter state persists across renders, so
+    # reusing one would compare a cold pass against a warm one.
+    by_seconds = np.asarray(fresh().render(seconds=0.25))
+    by_buffer = np.asarray(fresh().render(np.zeros(int(0.25 * SR), dtype=np.float32)))
+
+    assert len(by_seconds) == int(0.25 * SR) * 2
+    np.testing.assert_array_equal(by_seconds, by_buffer)
+
+
+def test_render_wants_exactly_one_of_input_or_seconds():
+    eng = Engine(voices=1, mode="playback")
+    eng.allocate(seconds=1.0)
+    with pytest.raises(ValueError, match="exactly one"):
+        eng.render()
+    with pytest.raises(ValueError, match="exactly one"):
+        eng.render(np.zeros(8, dtype=np.float32), seconds=1.0)
+
+
+def test_render_to_takes_seconds_too(tmp_path):
+    eng = Engine(voices=1, sample_rate=SR, mode="playback")
+    eng[0].buffer = sine_buffer()
+    eng[0].configure(loop_region=(0, 1), rate=1.0)
+    eng[0].play = True
+    eng[0].cut_to(0.0)
+
+    path = eng.render_to(tmp_path / "s.wav", seconds=0.5)
+    data, channels, sr = softcut.read_wav(path)
+    assert len(data) // channels == int(0.5 * SR)
+    assert sr == int(SR)
+    assert max(abs(x) for x in data) > 0.0
+
+
+def test_wav_helpers_are_public():
+    """They back the norns layer and every demo; they are not internals."""
+    assert {"read_wav", "read_wav_mono", "write_wav"} <= set(softcut.__all__)
+    from softcut import _wavio
+
+    assert softcut.write_wav is _wavio.write_wav
+    assert softcut.read_wav is _wavio.read_wav
+    assert softcut.read_wav_mono is _wavio.read_wav_mono
+
+
 def test_engine_allocate_requires_one_of():
     eng = Engine(voices=1, mode="playback")
     with pytest.raises(ValueError):

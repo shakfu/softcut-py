@@ -2,13 +2,13 @@
 
 ![CI](https://github.com/shakfu/softcut-py/actions/workflows/ci.yml/badge.svg)
 
-Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via [miniaudio](https://github.com/mackron/miniaudio). Built with [nanobind](https://github.com/wjakob/nanobind), and with **no dependencies**: buffers are plain `array.array("f")`, and audio, WAV I/O and the OSC server all work on a bare install.
+Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via [miniaudio](https://github.com/mackron/miniaudio). Built with [nanobind](https://github.com/wjakob/nanobind), and with **no dependencies**: buffers are any buffer-protocol object — `array.array("f")` from the standard library, or a numpy array if you already use one — and audio, WAV I/O and the OSC server all work on a bare install.
 
 The primary API exposes softcut as idiomatic Python objects. An optional [norns-compatible layer](#norns-compatible-api) (`softcut.norns`) additionally mirrors the flat norns Lua `softcut` API for porting existing scripts.
 
 ## Concepts
 
-- **`Voice`** wraps one `softcut::Voice`: a crossfading read/write head over an audio buffer, with rate, loop points, record/play, fades, and pre/post state-variable filters. Parameters are plain attributes; the buffer is a `float32` buffer **you** own (softcut-lib never allocates buffer memory) — anything C-contiguous, so an `array.array("f")`, a `memoryview`, or a numpy array. Buffer length must be a power of two — use `softcut.next_power_of_two` or `Engine.allocate`, which rounds up for you. The same array can be shared by several voices.
+- **`Voice`** wraps one `softcut::Voice`: a crossfading read/write head over an audio buffer, with rate, loop points, record/play, fades, and pre/post state-variable filters. Parameters are plain attributes; the buffer is `float32` memory **you** own, since softcut-lib never allocates buffer memory. The interface is the buffer protocol, so anything C-contiguous works — an `array.array("f")`, a `memoryview`, a numpy array — and it is *stored, not copied*: `voice.buffer` hands back the object you assigned and softcut records into that memory. `Engine.allocate` returns an `array.array("f")`, rounding the length up to the power of two softcut requires (`next_power_of_two` does the arithmetic alone). One buffer can be shared by several voices.
 
 - **`Engine`** is the multi-voice host: it owns a set of voices and a miniaudio device, and runs them either live (realtime mic/speaker I/O on a background audio thread) or offline via `Engine.render`. It is a context manager and a sequence of voices.
 
@@ -39,32 +39,44 @@ with softcut.Engine(voices=2) as eng:          # opens the audio device
 No device; process a mono block through the voices and get the mixed stereo output back. This is the deterministic path used by the tests:
 
 ```python
-import numpy as np, softcut
+import array, softcut
 
 eng = softcut.Engine(voices=1, mode="playback")
-v = eng[0]
-v.buffer = np.zeros(2**16, dtype=np.float32)
-v.configure(loop_region=(0, 1), rate=1.0)
-v.rec = v.play = True
-v.cut_to(0)
+eng.allocate(seconds=2)                              # a shared power-of-two buffer
+eng[0].configure(loop_region=(0, 1), rate=1.0, rec_level=1.0)
+eng[0].rec = eng[0].play = True
+eng[0].cut_to(0)
 
-out = eng.render(np.random.randn(48000).astype(np.float32))   # flat, interleaved
-frames = np.asarray(out).reshape(-1, eng.out_channels)        # (48000, 2), no copy
+# an input buffer is what the voices record; two laps, so the first is heard back
+eng.render_to("recorded.wav", array.array("f", [0.3] * 96000))
+
+eng[0].rec = False
+eng.render_to("loop.wav", seconds=4)                 # nothing to record: just play
 ```
 
-`render` returns interleaved frames in an `array.array("f")`; wrapping it in numpy costs nothing. Pass your own buffer as `out` — of either kind — to fill it in place and skip the allocation:
+`render_to` is `render` plus `write_wav`, without restating the sample rate and channel count the engine already knows. Both take either `seconds`, which feeds the voices that much silence, or an `input` buffer — the engine's mono input, which voices with `rec` on record and the rest ignore.
+
+To keep the samples rather than write them, `render` returns interleaved frames in an `array.array("f")`. numpy is not needed for any of the above, but if you have it, it wraps that without copying:
 
 ```python
-mono = np.random.randn(48000).astype(np.float32)
-buf = np.empty(48000 * eng.out_channels, dtype=np.float32)
-eng.render(mono, buf)          # fills and returns buf
+import numpy as np
+
+out = eng.render(seconds=4)                              # flat, interleaved
+frames = np.asarray(out).reshape(-1, eng.out_channels)   # (n, out_channels), a view
+frames[0, 0] = 0.0                                       # writes into `out` itself
 ```
 
-Load/save audio with whatever you like (e.g. `soundfile`) and assign the array to `voice.buffer`.
+`softcut.read_wav`, `read_wav_mono` and `write_wav` handle PCM WAV on the standard library alone, which is what the norns layer and the demos use. For anything else — FLAC, OGG, resampling — load with whatever you like (e.g. [`soundfile`](https://python-soundfile.readthedocs.io/)) and assign the result to `voice.buffer`:
+
+```python
+samples, sr = softcut.read_wav_mono("loop.wav")
+buf = eng.allocate(frames=len(samples))          # rounded up to a power of two
+buf[: len(samples)] = samples
+```
 
 ## Dependencies
 
-softcut-py has **no dependencies**, numpy included. Buffers are `array.array("f")` and every entry point takes any C-contiguous float32 buffer, so numpy arrays work wherever you care to use them — as a voice's buffer, as render input, as an `out` buffer — and `numpy.asarray` wraps what softcut returns without copying. The extension allocates no results and imports nothing.
+softcut-py has **no dependencies**, numpy included. What softcut allocates for you — `Engine.allocate`, `render`, `NornsSoftcut.buffers` — is `array.array("f")`, and what it accepts is any C-contiguous float32 buffer, so numpy arrays work wherever you care to use them — as a voice's buffer, as render input, as an `out` buffer — and `numpy.asarray` wraps what softcut returns without copying. The extension allocates no results and imports nothing.
 
 The sample-level buffer arithmetic and the WAV sample-format conversion run in C++ (shared with the standalone server), and `wave` from the standard library parses the container.
 
@@ -80,6 +92,7 @@ One consequence worth knowing: a float64 array is now **refused** rather than si
 Voices mix to stereo via each voice's `level` and `pan`. `Engine.feedback(src, dst, amount)` routes one voice's output into another's input (one block delayed; `src == dst` is a self-feedback delay line), and each voice's `input_gain` scales the engine's external (mic) input into it:
 
 ```python
+eng = softcut.Engine(voices=2)
 eng.feedback(0, 1, 0.4)     # voice 0 -> voice 1 input
 eng[1].input_gain = 0.0     # voice 1 ignores the mic
 ```
@@ -106,6 +119,7 @@ softcut.loop_end(1, 4.0)
 softcut.rate(1, 1.0)
 softcut.level(1, 0.8)
 softcut.play(1, 1)
+softcut.position(1, 0.0)                         # cut the head into the loop
 
 softcut.start()                                  # open the audio device
 ```
@@ -114,7 +128,7 @@ softcut.start()                                  # open the audio device
 
 - **Buffer/disk ops** — `buffer_read_*` / `buffer_write_*`, `buffer_copy_*`, `buffer_clear*`, on the shared C++ buffer primitives plus the standard-library `wave` module (WAV only, no new dependency), with preserve/mix crossfade, edge `fade_time` and `reverse`. Operations write in place, so they are safe against the running audio thread; reads are non-resampling, matching norns.
 
-`softcut.render` / `softcut.start` / `softcut.stop` drive audio (norns runs its audio continuously; here you render offline or open the device explicitly). Phase polling and per-sample level/pan slews are not yet implemented; see [`docs/dev/norns-api.md`](docs/dev/norns-api.md) for the full mapping and status. `demos/12_norns_api.py` is a narrated walkthrough built entirely on this layer.
+`softcut.render` / `softcut.start` / `softcut.stop` drive audio (norns runs its audio continuously; here you render offline or open the device explicitly). Setting a loop region does not move the play head, so `position` is what makes a loop actually loop — without it the head runs past `loop_end` and off the end of the material. Phase polling and per-sample level/pan slews are not implemented here; the [norns layer guide](docs/guide/norns.md) has the full surface, the gaps and the reasons, and `demos/12_norns_api.py` is a narrated walkthrough built entirely on this layer.
 
 ## OSC server
 
@@ -146,6 +160,7 @@ Then drive it from any OSC client (voice/buffer indices 0-based):
 /set/param/cut/loop_flag 0 1
 /set/level/cut           0 0.8
 /set/param/cut/play_flag 0 1
+/set/param/cut/position  0 0.0        # cut the head in, or it runs past loop_end
 /softcut/buffer/read_mono "loop.wav"  0.0 0.0 -1  0 0
 /poll/start/cut/phase                 # -> /poll/softcut/phase <voice> <phase>
 ```
@@ -176,7 +191,7 @@ The Python extension and this binary share their Python-free C++ core (command q
 
 ### TouchOSC surface
 
-[`clients/touchosc`](clients/touchosc/) holds a TouchOSC layout, `softcut.tosc`, that plays either server over the wire protocol: a mixer strip per voice, tabular pages for the loop, record and filter parameters, the feedback and voice-sync matrices, buffer and disk operations, and a receive-only phase readout fed by the phase poll. It is generated from Python with [py2tosc](https://pypi.org/project/py2tosc/) rather than drawn by hand, so `make touchosc` rebuilds it for a different canvas, voice count or parameter range, and the test suite pushes every binding in it through the server's own dispatch table.
+[`clients/touchosc`](clients/touchosc/) holds a TouchOSC layout, `softcut.tosc`, that plays either server over the wire protocol: a mixer strip per voice, tabular pages for the loop, record and filter parameters, the feedback and voice-sync matrices, buffer and disk operations, and a receive-only phase readout fed by the phase poll. It is generated from Python with [py2tosc](https://pypi.org/project/py2tosc/) rather than drawn by hand, so `make touchosc` rebuilds it for a different canvas, voice count or parameter range, and the test suite pushes every binding in it through the server's own dispatch table. [`demos/13_osc_surface.py`](demos/13_osc_surface.py) drives that surface over a real socket into a real server and renders the result, which is the quickest way to see the whole stack work; `--serve` instead opens the device and prints what to enter in TouchOSC's connection settings.
 
 ## Build and test
 

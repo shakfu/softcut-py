@@ -145,7 +145,8 @@ A multi-voice host owning its voices and an audio device. It is a context manage
 | `allocate(seconds=None, frames=None, shared=True)` | Allocate and assign zeroed `float32` buffer(s), rounded up to a power of two. Provide exactly one of `seconds`/`frames`. `shared=True` gives all voices one buffer; `False` gives each its own. Returns the buffer or the list of buffers. |
 | `sync(follow, lead, offset=0.0)` | Cut the `follow` voice to the `lead` voice's position + `offset`. |
 | `feedback(src, dst, amount=None)` | Get (omit `amount`) or set the feedback gain from voice `src`'s output into voice `dst`'s input. `src == dst` is self-feedback. Returns the engine when setting. |
-| `render(input)` | Offline: process a 1-D `float32` mono array through all voices; returns an `(n, out_channels)` array. Raises if the device is running. |
+| `render(input=None, out=None, *, seconds=None)` | Offline: process a 1-D `float32` mono buffer through all voices, or `seconds` of silence -- exactly one of the two. Writes interleaved frames into `out`, or into a fresh `array.array("f")` of `n * out_channels` samples, and returns it. Raises if the device is running. |
+| `render_to(path, input=None, out=None, *, seconds=None)` | `render` followed by `write_wav`, taking the sample rate and channel count from the engine. Returns the path written. |
 | `start()` / `stop()` | Start/stop the device (non-blocking). Return the engine. |
 
 ## Functions
@@ -154,6 +155,9 @@ A multi-voice host owning its voices and an audio device. It is a context manage
 | --- | --- |
 | `next_power_of_two(n)` | Smallest power of two `>= n` (and `>= 1`). |
 | `list_devices()` | List the system audio devices as dicts with keys `index`, `name`, `type` (`"playback"`/`"capture"`), `is_default`. |
+| `write_wav(path, data, sr, channels=None)` | Write float32 samples as 16-bit PCM. Takes any C-contiguous float32 buffer; a 2-D shape supplies the channel count, otherwise pass `channels`. Returns the path. |
+| `read_wav(path)` | Decode a WAV to interleaved float32. Returns `(data, channels, sample_rate)`, with `data` an `array.array("f")`. Handles 8/16/24/32-bit integer PCM. |
+| `read_wav_mono(path)` | The same, with channels averaged. Returns `(data, sample_rate)`. |
 
 ## Softcut
 

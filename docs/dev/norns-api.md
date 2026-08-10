@@ -1,6 +1,6 @@
 # Design proposal: a norns-compatible API layer
 
-Status: **implemented** in `softcut.norns` (since 0.1.1). This document is the original design record; it is kept for rationale. What actually shipped versus the proposal below:
+Status: **implemented** in `softcut.norns` (since 0.1.1). For using it, see [the norns layer guide](../guide/norns.md); this document is the original design record, kept for rationale. What actually shipped versus the proposal below:
 
 - **Tiers A and B shipped** in `softcut.norns.NornsSoftcut` (attribute passthrough and the buffer/disk ops). The design below reads as numpy because that is what it was implemented in; the arithmetic has since moved to the shared C++ primitives in `src/shared/buffer_ops.hpp` and the WAV conversion to `_core._pcm_*`, so the layer no longer requires numpy. The illustrative `_NornsSoftcut` sketch below is pre-implementation; the real class is `NornsSoftcut`.
 
