@@ -9,6 +9,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -30,6 +32,7 @@
 
 #include "miniaudio.h"
 
+#include "shared/buffer_ops.hpp"
 #include "shared/command_queue.hpp"
 #include "shared/device.hpp"
 #include "shared/mixer.hpp"
@@ -205,10 +208,24 @@ struct Voice {
         buffer_ref = std::move(arr);
     }
 
-    // Process one mono block: float32 input -> newly-allocated float32 output.
-    nb::object process(nb::object input) {
+    // Process one mono block: float32 input -> float32 output. With `out` given,
+    // the result is written into the caller's buffer and that same object is
+    // returned, which is the path that needs no numpy; otherwise a numpy array
+    // is allocated and returned as before.
+    nb::object process(nb::object input, nb::object out) {
         BufferArray in = nb::cast<BufferArray>(input);
         size_t n = in.shape(0);
+
+        if (!out.is_none()) {
+            BufferArray o = nb::cast<BufferArray>(out);
+            if (o.shape(0) < n) {
+                throw std::invalid_argument(
+                    "out is too small: need " + std::to_string(n) + " samples, got " +
+                    std::to_string(o.shape(0)));
+            }
+            v.processBlockMono(in.data(), o.data(), static_cast<int>(n));
+            return out;
+        }
 
         float *out_data = new float[n == 0 ? 1 : n];
         nb::capsule owner(out_data, [](void *p) noexcept { delete[] static_cast<float *>(p); });
@@ -329,15 +346,34 @@ struct Engine {
         }
     }
 
-    // Offline: mono input (n,) -> interleaved stereo output (n, out_channels).
-    nb::object render(nb::object input) {
+    // Offline: mono input (n,) -> interleaved output. Returns an (n, out_channels)
+    // numpy array, or -- given `dest`, a flat buffer of n*out_channels floats --
+    // writes the interleaved frames into it and returns it, which is the path
+    // that needs no numpy. Shape is the only thing lost that way: a plain buffer
+    // carries no second dimension.
+    nb::object render(nb::object input, nb::object dest) {
         BufferArray in = nb::cast<BufferArray>(input);
         size_t n = in.shape(0);
         const float *inp = in.data();
+        const size_t needed = n * static_cast<size_t>(out_channels);
 
-        size_t total = (n == 0 ? 1 : n) * static_cast<size_t>(out_channels);
-        float *out = new float[total];
-        nb::capsule owner(out, [](void *p) noexcept { delete[] static_cast<float *>(p); });
+        float *out = nullptr;
+        nb::object owner_obj;
+        nb::capsule owner;
+        if (!dest.is_none()) {
+            BufferArray d = nb::cast<BufferArray>(dest);
+            if (d.shape(0) < needed) {
+                throw std::invalid_argument(
+                    "out is too small: need " + std::to_string(needed) +
+                    " samples (n * out_channels), got " + std::to_string(d.shape(0)));
+            }
+            out = d.data();
+        } else {
+            out = new float[needed == 0 ? 1 : needed];
+            owner = nb::capsule(out, [](void *p) noexcept {
+                delete[] static_cast<float *>(p);
+            });
+        }
 
         size_t done = 0;
         while (done < n) {
@@ -345,6 +381,7 @@ struct Engine {
             process_core(inp + done, out + done * out_channels, chunk);
             done += static_cast<size_t>(chunk);
         }
+        if (!dest.is_none()) return dest;
         return nb::cast(nb::ndarray<nb::numpy, float, nb::ndim<2>>(
             out, {n, static_cast<size_t>(out_channels)}, owner));
     }
@@ -918,9 +955,10 @@ NB_MODULE(_core, m) {
             "Quantized phase (in units of phase_quant).")
 
         // actions
-        .def("process", &Voice::process, "input"_a,
-            "Process one mono block. Takes a 1-D float32 numpy array of input "
-            "samples and returns a new float32 array of the same length.")
+        .def("process", &Voice::process, "input"_a, "out"_a = nb::none(),
+            "Process one mono block. Takes any 1-D C-contiguous float32 buffer of "
+            "input samples. With `out` given, writes there and returns it; "
+            "otherwise allocates and returns a numpy array of the same length.")
         .def("cut_to", [](Voice &s, float sec) {
                 Voice *p = &s;
                 s.dsp_apply([p, sec] { p->v.cutToPos(sec); });
@@ -951,10 +989,11 @@ NB_MODULE(_core, m) {
             "Open (if needed) and start the audio device. Non-blocking.")
         .def("stop", &Engine::stop, nb::call_guard<nb::gil_scoped_release>(),
             "Stop the audio device.")
-        .def("render", &Engine::render, "input"_a,
-            "Offline: process a 1-D float32 mono input array through all voices "
-            "and return an (n, out_channels) float32 array. Do not call while "
-            "the device is running.")
+        .def("render", &Engine::render, "input"_a, "out"_a = nb::none(),
+            "Offline: process a 1-D float32 mono input buffer through all voices. "
+            "Returns an (n, out_channels) numpy array, or -- with `out`, a flat "
+            "buffer of n*out_channels floats -- writes interleaved frames there "
+            "and returns it. Do not call while the device is running.")
         .def("set_feedback", &Engine::set_feedback, "src"_a, "dst"_a, "amount"_a,
             "Set the feedback gain from voice src's output into voice dst's input.")
         .def("get_feedback", &Engine::get_feedback, "src"_a, "dst"_a,
@@ -968,6 +1007,130 @@ NB_MODULE(_core, m) {
     m.def("list_devices", &list_audio_devices,
         "List the system audio devices as dicts with keys "
         "index/name/type/is_default.");
+
+    // --- buffer arithmetic (shared/buffer_ops.hpp) ---
+    // The sample-level primitives every buffer operation reduces to, shared with
+    // the standalone server so the two hosts cannot drift. They take any
+    // C-contiguous float32 buffer (numpy array, array.array, memoryview), write
+    // in place, and hold no GIL while looping -- so a long buffer edit does not
+    // starve anything else in the interpreter.
+    m.def("_buffer_apply",
+        [](BufferArray dst, int64_t start, std::optional<BufferArray> src,
+           float preserve, float mix, int64_t fade, int64_t count) {
+            float *d = dst.data();
+            const long dn = static_cast<long>(dst.shape(0));
+            const float *s = src ? src->data() : nullptr;
+            long n = count >= 0
+                         ? static_cast<long>(count)
+                         : (src ? static_cast<long>(src->shape(0)) : 0);
+            {
+                nb::gil_scoped_release nogil;
+                scsh::apply_to_buffer(d, dn, static_cast<long>(start), s, n,
+                                      preserve, mix, static_cast<long>(fade));
+            }
+        },
+        "dst"_a, "start"_a, "src"_a.none(), "preserve"_a = 0.0f, "mix"_a = 1.0f,
+        "fade"_a = 0, "count"_a = -1,
+        "Blended in-place write into dst at frame `start`: "
+        "dst = dst*(1-env) + (dst*preserve + src*mix)*env, where env is a linear "
+        "edge fade over `fade` frames at each end. src=None writes silence "
+        "(a clear), in which case `count` gives the length. A negative `start` "
+        "trims the head of src. Read, copy and clear are all this one operation.");
+
+    // --- PCM conversion ---
+    // The sample-format half of WAV I/O, which is the only part of it that is
+    // per-sample work. Container parsing stays in Python on the stdlib `wave`
+    // module, so no WAV decoder is vendored into the extension. Not in
+    // shared/: the standalone server has dr_wav and no use for these.
+    m.def("_pcm_decode",
+        [](BufferArray out, nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> raw,
+           int width) {
+            float *o = out.data();
+            const uint8_t *r = raw.data();
+            const int64_t n = std::min<int64_t>(
+                static_cast<int64_t>(out.shape(0)),
+                static_cast<int64_t>(raw.shape(0)) / width);
+            nb::gil_scoped_release nogil;
+            switch (width) {
+                case 1:  // unsigned 8-bit, midpoint 128
+                    for (int64_t i = 0; i < n; ++i)
+                        o[i] = (static_cast<float>(r[i]) - 128.0f) / 128.0f;
+                    break;
+                case 2:
+                    for (int64_t i = 0; i < n; ++i) {
+                        const int16_t v = static_cast<int16_t>(
+                            static_cast<uint16_t>(r[2 * i]) |
+                            (static_cast<uint16_t>(r[2 * i + 1]) << 8));
+                        o[i] = static_cast<float>(v) / 32768.0f;
+                    }
+                    break;
+                case 3: {  // packed little-endian signed 24-bit
+                    for (int64_t i = 0; i < n; ++i) {
+                        int32_t v = static_cast<int32_t>(r[3 * i]) |
+                                    (static_cast<int32_t>(r[3 * i + 1]) << 8) |
+                                    (static_cast<int32_t>(r[3 * i + 2]) << 16);
+                        if (v & 0x800000) v -= 0x1000000;
+                        o[i] = static_cast<float>(v) / 8388608.0f;
+                    }
+                    break;
+                }
+                case 4:
+                    for (int64_t i = 0; i < n; ++i) {
+                        const int32_t v = static_cast<int32_t>(
+                            static_cast<uint32_t>(r[4 * i]) |
+                            (static_cast<uint32_t>(r[4 * i + 1]) << 8) |
+                            (static_cast<uint32_t>(r[4 * i + 2]) << 16) |
+                            (static_cast<uint32_t>(r[4 * i + 3]) << 24));
+                        o[i] = static_cast<float>(v) / 2147483648.0f;
+                    }
+                    break;
+                default:
+                    break;  // rejected in Python, where the error can say why
+            }
+        },
+        "out"_a, "raw"_a, "width"_a,
+        "Decode little-endian integer PCM (1/2/3/4 bytes per sample, 8-bit "
+        "unsigned and the rest signed) into float32 in [-1, 1].");
+
+    m.def("_pcm_encode_s16",
+        [](BufferArray src) {
+            const int64_t n = static_cast<int64_t>(src.shape(0));
+            std::vector<uint8_t> out(static_cast<size_t>(n) * 2);
+            {
+                const float *s = src.data();
+                uint8_t *o = out.data();
+                nb::gil_scoped_release nogil;
+                for (int64_t i = 0; i < n; ++i) {
+                    const uint16_t v = static_cast<uint16_t>(scsh::float_to_s16(s[i]));
+                    o[2 * i] = static_cast<uint8_t>(v & 0xFF);
+                    o[2 * i + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+                }
+            }
+            return nb::bytes(out.data(), out.size());
+        },
+        "src"_a,
+        "Quantize float32 to little-endian signed 16-bit PCM bytes, clipping "
+        "to [-1, 1] first.");
+
+    m.def("_buffer_extract_channel",
+        [](BufferArray out, BufferArray interleaved, int channels, int col,
+           int64_t start, int64_t total) {
+            float *o = out.data();
+            const long n = static_cast<long>(out.shape(0));
+            const float *d = interleaved.data();
+            const long tot = total >= 0
+                                 ? static_cast<long>(total)
+                                 : static_cast<long>(interleaved.shape(0)) / channels;
+            {
+                nb::gil_scoped_release nogil;
+                scsh::extract_channel_into(o, d, static_cast<unsigned>(channels), col,
+                                           static_cast<long>(start), n, tot);
+            }
+        },
+        "out"_a, "interleaved"_a, "channels"_a, "col"_a, "start"_a = 0, "total"_a = -1,
+        "De-interleave channel `col` of interleaved frame data into `out`, "
+        "starting at frame `start`. Frames outside the source read as silence, "
+        "so a range overrunning either end is padded rather than refused.");
 
     // --- apply-latency probe (benchmark only; compile-time gated) ---
     // Present only when built with SOFTCUT_ENABLE_BENCH_PROBE=ON. It isolates the

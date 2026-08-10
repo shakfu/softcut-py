@@ -20,20 +20,28 @@ classifiers = [
     "Programming Language :: C++",
     "Typing :: Typed",
 ]
-dependencies = [
-    "numpy>=1.21",
-]
+dependencies = []
 
 [project.optional-dependencies]
-# Pure-Python OSC transport for softcut.osc. The core stays numpy-only; install
-# with `pip install softcut-py[osc]`. An optional native transport (built-in
-# tinyosc, CMake option SOFTCUT_ENABLE_TINYOSC) can replace this at runtime.
+# numpy is optional. Buffers are plain `array.array("f")` and every entry point
+# takes any C-contiguous float32 buffer, so the library runs without it; it is
+# needed only for `Engine.render`/`Voice.process` to *allocate* their result,
+# which passing `out=` avoids. Install with `pip install softcut-py[numpy]`.
+numpy = [
+    "numpy>=1.21",
+]
+# Pure-Python OSC transport for softcut.osc. An optional native transport
+# (built-in tinyosc, CMake option SOFTCUT_ENABLE_TINYOSC) can replace this at
+# runtime.
 osc = [
     "python-osc>=1.8",
 ]
 
 [dependency-groups]
 dev = [
+    # The suite and the demos are written in numpy, and the numpy-specific paths
+    # (the ndarray return from render/process) need it to be exercised at all.
+    "numpy>=1.21",
     "mypy>=1.19.1",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
@@ -94,7 +102,7 @@ skip = "*-musllinux_*"
 build-verbosity = 1
 # Install the built wheel and run the suite on each target. numpy arrives via the
 # wheel's own dependency; live-device tests skip without SOFTCUT_TEST_AUDIO.
-test-requires = "pytest"
+test-requires = "pytest numpy"
 test-command = "pytest {project}/tests -q"
 
 [tool.cibuildwheel.macos.environment]

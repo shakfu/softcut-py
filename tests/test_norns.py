@@ -28,6 +28,16 @@ def sec(frames: int) -> float:
     return frames / SR
 
 
+def buf(host, index):
+    """A writable numpy view of a norns buffer.
+
+    Buffers are stdlib `array.array("f")` now that the library keeps numpy
+    optional; `np.asarray` wraps one without copying, so the assertions below
+    stay numpy-idiomatic while what they inspect is the real buffer object.
+    """
+    return np.asarray(host.buffers[index])
+
+
 # --- _wavio round-trips --------------------------------------------------
 
 
@@ -36,7 +46,7 @@ def test_wavio_mono_roundtrip(tmp_path):
     p = write_wav(tmp_path / "m.wav", data, int(SR))
     back, sr = read_wav_mono(p)
     assert sr == int(SR)
-    assert back.dtype == np.float32
+    assert back.typecode == "f"  # a stdlib float32 buffer, not an ndarray
     assert np.allclose(back, data, atol=1e-3)
 
 
@@ -44,10 +54,33 @@ def test_wavio_stereo_keeps_channels(tmp_path):
     left = np.full(64, 0.5, dtype=np.float32)
     right = np.full(64, -0.5, dtype=np.float32)
     write_wav(tmp_path / "s.wav", np.stack([left, right], axis=1), int(SR))
-    data, sr = read_wav(tmp_path / "s.wav")
-    assert data.shape == (64, 2)
-    assert np.allclose(data[:, 0], 0.5, atol=1e-3)
-    assert np.allclose(data[:, 1], -0.5, atol=1e-3)
+    data, channels, sr = read_wav(tmp_path / "s.wav")
+    # Interleaved rather than (frames, channels): there is no 2-D without numpy.
+    assert channels == 2
+    assert len(data) == 64 * 2
+    assert np.allclose(np.asarray(data)[0::2], 0.5, atol=1e-3)
+    assert np.allclose(np.asarray(data)[1::2], -0.5, atol=1e-3)
+
+
+def test_wavio_averages_channels_for_mono(tmp_path):
+    """read_wav_mono sums the channels and divides, all through the C primitives."""
+    left = np.full(64, 0.5, dtype=np.float32)
+    right = np.full(64, -0.1, dtype=np.float32)
+    write_wav(tmp_path / "s.wav", np.stack([left, right], axis=1), int(SR))
+    mono, _sr = read_wav_mono(tmp_path / "s.wav")
+    assert np.allclose(np.asarray(mono), 0.2, atol=1e-3)
+
+
+def test_wavio_writes_a_flat_interleaved_buffer(tmp_path):
+    """A 1-D buffer plus an explicit channel count is the numpy-free way in."""
+    import array
+
+    frames = array.array("f", [0.5, -0.5] * 32)  # L, R interleaved
+    write_wav(tmp_path / "f.wav", frames, int(SR), channels=2)
+    data, channels, _sr = read_wav(tmp_path / "f.wav")
+    assert channels == 2
+    assert np.allclose(np.asarray(data)[0::2], 0.5, atol=1e-3)
+    assert np.allclose(np.asarray(data)[1::2], -0.5, atol=1e-3)
 
 
 def test_wavio_clips_out_of_range(tmp_path):
@@ -144,37 +177,37 @@ def test_module_proxy_reaches_default_singleton():
 
 def test_buffer_clear(sc):
     for b in (1, 2):
-        sc.buffers[b][:] = 1.0
+        buf(sc, b)[:] = 1.0
     sc.buffer_clear()
-    assert not sc.buffers[1].any()
-    assert not sc.buffers[2].any()
+    assert not buf(sc, 1).any()
+    assert not buf(sc, 2).any()
 
 
 def test_buffer_clear_channel(sc):
-    sc.buffers[1][:] = 1.0
-    sc.buffers[2][:] = 1.0
+    buf(sc, 1)[:] = 1.0
+    buf(sc, 2)[:] = 1.0
     sc.buffer_clear_channel(2)
-    assert sc.buffers[1].all()
-    assert not sc.buffers[2].any()
+    assert buf(sc, 1).all()
+    assert not buf(sc, 2).any()
 
 
 def test_clear_region_preserve(sc):
-    sc.buffers[1][:] = 1.0
+    buf(sc, 1)[:] = 1.0
     sc.buffer_clear_region_channel(1, 0.0, sec(8), preserve=0.25)
-    assert np.allclose(sc.buffers[1][:8], 0.25)
-    assert np.allclose(sc.buffers[1][8:16], 1.0)  # outside region untouched
+    assert np.allclose(buf(sc, 1)[:8], 0.25)
+    assert np.allclose(buf(sc, 1)[8:16], 1.0)  # outside region untouched
 
 
 def test_clear_region_both_buffers(sc):
-    sc.buffers[1][:] = 1.0
-    sc.buffers[2][:] = 1.0
+    buf(sc, 1)[:] = 1.0
+    buf(sc, 2)[:] = 1.0
     sc.buffer_clear_region(0.0, sec(4))
-    assert np.allclose(sc.buffers[1][:4], 0.0)
-    assert np.allclose(sc.buffers[2][:4], 0.0)
+    assert np.allclose(buf(sc, 1)[:4], 0.0)
+    assert np.allclose(buf(sc, 2)[:4], 0.0)
 
 
 def test_copy_mono_basic(sc):
-    b = sc.buffers[1]
+    b = buf(sc, 1)
     b[:] = 0.0
     b[100:110] = 0.5
     sc.buffer_copy_mono(1, 1, sec(100), sec(200), sec(10))
@@ -182,7 +215,7 @@ def test_copy_mono_basic(sc):
 
 
 def test_copy_mono_reverse(sc):
-    b = sc.buffers[1]
+    b = buf(sc, 1)
     b[:] = 0.0
     b[0:4] = [0.1, 0.2, 0.3, 0.4]
     sc.buffer_copy_mono(1, 1, 0.0, sec(500), sec(4), reverse=1)
@@ -192,7 +225,7 @@ def test_copy_mono_reverse(sc):
 def test_copy_mono_overlap_no_alias(sc):
     # Overlapping shift within one buffer must copy the original source, not the
     # partially-written destination.
-    b = sc.buffers[1]
+    b = buf(sc, 1)
     b[:] = 0.0
     b[0:8] = np.arange(1, 9, dtype=np.float32)
     sc.buffer_copy_mono(1, 1, 0.0, sec(4), sec(8))
@@ -200,17 +233,17 @@ def test_copy_mono_overlap_no_alias(sc):
 
 
 def test_copy_stereo(sc):
-    sc.buffers[1][:] = 0.0
-    sc.buffers[2][:] = 0.0
-    sc.buffers[1][0:4] = 0.7
-    sc.buffers[2][0:4] = -0.7
+    buf(sc, 1)[:] = 0.0
+    buf(sc, 2)[:] = 0.0
+    buf(sc, 1)[0:4] = 0.7
+    buf(sc, 2)[0:4] = -0.7
     sc.buffer_copy_stereo(0.0, sec(100), sec(4))
-    assert np.allclose(sc.buffers[1][100:104], 0.7)
-    assert np.allclose(sc.buffers[2][100:104], -0.7)
+    assert np.allclose(buf(sc, 1)[100:104], 0.7)
+    assert np.allclose(buf(sc, 2)[100:104], -0.7)
 
 
 def test_copy_preserve_blend(sc):
-    b = sc.buffers[1]
+    b = buf(sc, 1)
     b[:] = 0.0
     b[0:4] = 0.5  # source
     b[100:104] = 1.0  # destination pre-fill
@@ -220,8 +253,8 @@ def test_copy_preserve_blend(sc):
 
 
 def test_read_write_mono_roundtrip(sc, tmp_path):
-    b1 = sc.buffers[1]
-    b2 = sc.buffers[2]
+    b1 = buf(sc, 1)
+    b2 = buf(sc, 2)
     tone = (0.5 * np.sin(np.linspace(0, 4 * np.pi, 480))).astype(np.float32)
     b1[:480] = tone
     sc.buffer_write_mono(tmp_path / "m.wav", 0.0, sec(480), ch=1)
@@ -232,20 +265,20 @@ def test_read_write_mono_roundtrip(sc, tmp_path):
 
 def test_read_write_stereo_roundtrip(sc, tmp_path):
     tone = (0.5 * np.sin(np.linspace(0, 4 * np.pi, 480))).astype(np.float32)
-    sc.buffers[1][:480] = tone
-    sc.buffers[2][:480] = -tone
+    buf(sc, 1)[:480] = tone
+    buf(sc, 2)[:480] = -tone
     sc.buffer_write_stereo(tmp_path / "s.wav", 0.0, sec(480))
-    sc.buffers[1][:] = 0.0
-    sc.buffers[2][:] = 0.0
+    buf(sc, 1)[:] = 0.0
+    buf(sc, 2)[:] = 0.0
     sc.buffer_read_stereo(tmp_path / "s.wav")
-    assert np.allclose(sc.buffers[1][:480], tone, atol=1e-3)
-    assert np.allclose(sc.buffers[2][:480], -tone, atol=1e-3)
+    assert np.allclose(buf(sc, 1)[:480], tone, atol=1e-3)
+    assert np.allclose(buf(sc, 2)[:480], -tone, atol=1e-3)
 
 
 def test_read_mono_preserve_mix(sc, tmp_path):
     src = np.full(480, 0.5, dtype=np.float32)
     write_wav(tmp_path / "x.wav", src, int(SR))
-    b2 = sc.buffers[2]
+    b2 = buf(sc, 2)
     b2[:480] = 1.0
     sc.buffer_read_mono(tmp_path / "x.wav", ch_dst=2, preserve=0.5, mix=0.5)
     # dst = 1.0*0.5 + 0.5*0.5 = 0.75
@@ -255,7 +288,7 @@ def test_read_mono_preserve_mix(sc, tmp_path):
 def test_read_offsets_and_dur(sc, tmp_path):
     ramp = np.arange(1000, dtype=np.float32) / 1000.0
     write_wav(tmp_path / "r.wav", ramp, int(SR))
-    b1 = sc.buffers[1]
+    b1 = buf(sc, 1)
     b1[:] = 0.0
     # read 10 frames starting at source frame 500 into dest frame 20
     sc.buffer_read_mono(

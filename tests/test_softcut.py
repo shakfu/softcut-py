@@ -312,7 +312,9 @@ def test_engine_repr():
 def test_engine_allocate_shared():
     eng = Engine(voices=3, sample_rate=SR, mode="playback")
     buf = eng.allocate(seconds=2.0, shared=True)
-    assert buf.shape == (next_power_of_two(int(round(SR * 2.0))),)
+    # A stdlib float32 buffer, not an ndarray: numpy is optional now.
+    assert buf.typecode == "f"
+    assert len(buf) == next_power_of_two(int(round(SR * 2.0)))
     assert all(v.buffer is buf for v in eng)
 
 
@@ -320,7 +322,7 @@ def test_engine_allocate_per_voice():
     eng = Engine(voices=3, sample_rate=SR, mode="playback")
     bufs = eng.allocate(frames=1000, shared=False)
     assert len(bufs) == 3
-    assert all(b.shape == (1024,) for b in bufs)
+    assert all(len(b) == 1024 for b in bufs)
     assert all(v.buffer is b for v, b in zip(eng, bufs))
     assert bufs[0] is not bufs[1]
 

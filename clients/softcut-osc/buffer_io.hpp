@@ -1,5 +1,10 @@
 // Softcut buffer disk operations for the standalone server, backed by dr_wav.
 //
+// The sample-level arithmetic these are built on lives in
+// `src/shared/buffer_ops.hpp` and is shared with the Python extension; what is
+// here is the disk layer, which needs dr_wav and this host's own Engine type and
+// so is not shareable as it stands.
+//
 // Semantics match softcut-py's NornsSoftcut (and norns): reads copy file frames
 // into a buffer *at file rate with no resampling* -- a sample-rate mismatch
 // shifts pitch, as on norns -- with overwrite (preserve=0, mix=1). Writes emit
@@ -18,60 +23,14 @@
 
 #include "dr_wav.h"
 #include "engine.hpp"
+#include "shared/buffer_ops.hpp"
 
 namespace scosc {
 
-inline int16_t float_to_s16(float x) {
-    float v = x < -1.0f ? -1.0f : (x > 1.0f ? 1.0f : x);
-    long s = std::lround(v * 32767.0f);
-    if (s < -32768) s = -32768;
-    if (s > 32767) s = 32767;
-    return static_cast<int16_t>(s);
-}
-
-// Linear edge envelope: 1 in the interior, a 0->1 / 1->0 ramp over `f` frames at
-// each edge (f capped to n/2 by the caller). Mirrors softcut-py's _fade_env.
-inline float fade_env_at(long i, long n, long f) {
-    if (f <= 0) return 1.0f;
-    if (i < f) return static_cast<float>(i) / static_cast<float>(f);
-    if (i >= n - f) return static_cast<float>(n - 1 - i) / static_cast<float>(f);
-    return 1.0f;
-}
-
-// In-place blended write over [start, start+nsrc) of `buf`, with an edge
-// crossfade: dst = dst*(1-env) + (dst*preserve + src*mix)*env. This one
-// primitive backs read (preserve=0, mix=1) and clear (src=nullptr, mix=0), so an
-// overwrite fades into the surrounding audio instead of clicking. Mirrors
-// softcut-py's NornsSoftcut._apply. `fade` is in frames.
-inline void apply_to_buffer(float *buf, long bframes, long start,
-                            const float *src, long nsrc,
-                            float preserve, float mix, long fade) {
-    long off = 0;
-    if (start < 0) { off = -start; start = 0; }  // negative dst trims src head
-    long n = std::min(nsrc - off, bframes - start);
-    if (n <= 0) return;
-    const long f = std::min(fade, n / 2);
-    for (long i = 0; i < n; ++i) {
-        const float env = fade_env_at(i, n, f);
-        const float d = buf[start + i];
-        const float sv = src ? src[off + i] : 0.0f;
-        const float target = d * preserve + sv * mix;
-        buf[start + i] = d * (1.0f - env) + target * env;
-    }
-}
-
-// Load a whole channel's worth of file frames [s0, s0+ncopy) into a contiguous
-// vector, ready for apply_to_buffer.
-inline std::vector<float> extract_channel(const float *data, unsigned channels,
-                                          int col, long s0, long ncopy, long total) {
-    std::vector<float> out(static_cast<size_t>(std::max<long>(ncopy, 0)));
-    for (long i = 0; i < ncopy; ++i) {
-        const long si = s0 + i;
-        out[static_cast<size_t>(i)] =
-            (si >= 0 && si < total) ? data[si * channels + col] : 0.0f;
-    }
-    return out;
-}
+using scsh::apply_to_buffer;
+using scsh::extract_channel;
+using scsh::fade_env_at;
+using scsh::float_to_s16;
 
 // Optionally resample a mono f32 channel from in_sr to out_sr (miniaudio's linear
 // resampler). Off by default (see --resample-on-read); softcut/norns copy at file

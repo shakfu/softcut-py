@@ -26,15 +26,31 @@ Example (live looping)::
 
 from __future__ import annotations
 
+import array
 import contextlib
 import time
 import warnings
 from collections.abc import Iterator, Sequence
-
-import numpy as np
+from typing import Any
 
 from softcut._core import Voice, _Engine
 from softcut._core import list_devices as _list_devices
+
+#: numpy is optional. Buffers are plain `array.array("f")`, which numpy wraps
+#: without copying, and every entry point takes any C-contiguous float32 buffer.
+#: It is needed only to *allocate the return value* of `render`/`process` when
+#: no `out` buffer is supplied -- pass one and softcut never imports it.
+_np: Any | None
+try:
+    import numpy as _np
+except ImportError:  # pragma: no cover - exercised only without numpy
+    _np = None
+
+
+def _zeros(n: int) -> array.array:
+    """A zeroed float32 buffer of ``n`` samples, with no numpy involved."""
+    return array.array("f", bytes(4 * int(n)))
+
 
 __all__ = ["Voice", "Engine", "Softcut", "next_power_of_two", "list_devices"]
 __version__ = "0.3.0"
@@ -240,7 +256,7 @@ class Engine(Sequence[Voice]):
         seconds: float | None = None,
         frames: int | None = None,
         shared: bool = True,
-    ) -> np.ndarray | list[np.ndarray]:
+    ) -> Any:
         """Allocate and assign zeroed ``float32`` buffer(s) to the voices.
 
         Provide exactly one of ``seconds`` or ``frames``. The length is rounded
@@ -261,12 +277,12 @@ class Engine(Sequence[Voice]):
         n = next_power_of_two(requested)
 
         if shared:
-            buf = np.zeros(n, dtype=np.float32)
+            buf = _zeros(n)
             for v in self._voices:
                 v.buffer = buf
             return buf
 
-        bufs = [np.zeros(n, dtype=np.float32) for _ in self._voices]
+        bufs = [_zeros(n) for _ in self._voices]
         for v, buf in zip(self._voices, bufs):
             v.buffer = buf
         return bufs
@@ -287,21 +303,36 @@ class Engine(Sequence[Voice]):
         self._core.set_feedback(src, dst, float(amount))
         return self
 
-    def render(self, input: np.ndarray) -> np.ndarray:
+    def render(self, input: Any, out: Any = None) -> Any:
         """Offline: process a mono input block through all voices.
 
-        ``input`` is a 1-D array of mono samples. Returns an ``(n, out_channels)``
-        float32 array of the mixed output. Raises if the device is running (use
-        the live path then, not render).
+        ``input`` is any 1-D C-contiguous float32 buffer of mono samples -- an
+        ``array.array``, a ``memoryview``, or a numpy array. Returns an
+        ``(n, out_channels)`` float32 numpy array of the mixed output; pass
+        ``out``, a flat buffer of ``n * out_channels`` floats, to write the
+        interleaved frames there instead and skip numpy entirely. Raises if the
+        device is running (use the live path then, not render).
         """
         if self.running:
             raise RuntimeError(
                 "cannot render() while the device is running; stop() first"
             )
-        arr = np.ascontiguousarray(input, dtype=np.float32)
-        if arr.ndim != 1:
-            raise ValueError("render input must be a 1-D mono array")
-        return self._core.render(arr)
+        if _np is None and out is None:
+            raise RuntimeError(
+                "render() allocates its result as a numpy array, and numpy is not "
+                "installed. Either pass out= (a flat buffer of n * out_channels "
+                "float32 samples, which is written in place) or install numpy: "
+                "pip install softcut-py[numpy]"
+            )
+        arr = input
+        if _np is not None:
+            # Only a courtesy: float64 or a strided view becomes what the binding
+            # takes. Without numpy the buffer has to arrive in the right form,
+            # and the binding says so if it does not.
+            arr = _np.ascontiguousarray(input, dtype=_np.float32)
+            if arr.ndim != 1:
+                raise ValueError("render input must be a 1-D mono array")
+        return self._core.render(arr, out)
 
     def start(self) -> Engine:
         """Open (if needed) and start the audio device. Non-blocking."""

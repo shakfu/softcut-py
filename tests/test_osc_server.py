@@ -26,6 +26,11 @@ from softcut.osc import SoftcutOSC  # noqa: E402
 SR = 48000.0
 
 
+def buf(host, index):
+    """A writable numpy view of a norns buffer (a stdlib `array.array("f")`)."""
+    return np.asarray(host.buffers[index])
+
+
 def drive(client, messages, pred, timeout=2.0, interval=0.02):
     """Resend ``messages`` (list of ``(address, args)``) until ``pred`` holds.
 
@@ -138,19 +143,19 @@ def test_in_cut_sets_input_gain(server, client):
 
 def test_buffer_clear_region(server, client):
     host = server.host
-    for b in host.buffers.values():
-        b[:] = 1.0
+    for index in host.buffers:
+        buf(host, index)[:] = 1.0
     n = int(0.1 * SR)
     # clear is idempotent; resend until both channels' region reads zero.
     assert drive(
         client,
         [("/softcut/buffer/clear_region", [0.0, 0.1])],
         lambda: (
-            float(host.buffers[1][: n - 1].max()) == 0.0
-            and float(host.buffers[2][: n - 1].max()) == 0.0
+            float(buf(host, 1)[: n - 1].max()) == 0.0
+            and float(buf(host, 2)[: n - 1].max()) == 0.0
         ),
     )
-    assert host.buffers[1][n + 10] == 1.0  # outside the cleared region
+    assert buf(host, 1)[n + 10] == 1.0  # outside the cleared region
 
 
 def test_reset_restores_buffer_routing(server, client):

@@ -20,9 +20,11 @@ delegates to a private :class:`softcut.Engine`; a module-level ``__getattr__``
 proxies each name to that singleton, so ``softcut.<fn>`` works for the whole
 surface without per-name wiring.
 
-This implements Tiers A (attribute passthrough) and B (buffer/disk operations in
-pure numpy + stdlib WAV). Phase polling (Tier C) and the slew/routing gaps that
-need core changes (Tier D) are not implemented here; see ``docs/dev/norns-api.md``.
+This implements Tiers A (attribute passthrough) and B (buffer/disk operations).
+The sample-level arithmetic behind Tier B lives in ``src/shared/buffer_ops.hpp``
+and is shared with the standalone server; file I/O is the stdlib ``wave``
+module plus that same C conversion. Phase polling (Tier C) and the slew/routing gaps that need core
+changes (Tier D) are not implemented here; see ``docs/dev/norns-api.md``.
 
 Thread-safety rule (matches norns): buffer operations write into the existing
 arrays in place and never reallocate, so they are safe against a running audio
@@ -31,17 +33,17 @@ thread. Assigning a whole new buffer array is only safe while stopped.
 
 from __future__ import annotations
 
+import array
 from pathlib import Path
-
-import numpy as np
+from typing import Any
 
 from softcut import Engine, next_power_of_two
+from softcut import _core
 from softcut._wavio import read_wav, write_wav
 
 # norns' hardware layout: 6 voices, 2 global mono buffers. The buffer length
-# matches norns' softcut buffer (2**24 frames, ~349s at 48kHz). numpy zeros are
-# lazily backed by zero pages, so this does not cost resident memory until
-# written.
+# matches norns' softcut buffer (2**24 frames, ~349s at 48kHz). The allocation is
+# zeroed pages, so it does not cost resident memory until written.
 _DEFAULT_VOICES = 6
 _DEFAULT_BUFFER_FRAMES = 1 << 24
 _BUFFERS = (1, 2)
@@ -90,21 +92,6 @@ _BOOL_PARAMS = {
 }
 
 
-def _fade_env(n: int, fade_frames: int) -> np.ndarray:
-    """Linear in/out envelope of length ``n`` ramping over ``fade_frames`` edges.
-
-    Returns ones in the interior and a 0->1 (in) / 1->0 (out) ramp at the edges,
-    so a blended region fades into the surrounding audio instead of clicking.
-    """
-    env = np.ones(n, dtype=np.float32)
-    f = min(int(fade_frames), n // 2)
-    if f > 0:
-        ramp = np.linspace(0.0, 1.0, f, endpoint=False, dtype=np.float32)
-        env[:f] = ramp
-        env[n - f :] = ramp[::-1]
-    return env
-
-
 class NornsSoftcut:
     """The singleton facade. Holds one :class:`Engine` and the 2 global buffers.
 
@@ -124,7 +111,7 @@ class NornsSoftcut:
         self._n = int(voices)
         self._eng = Engine(voices=voices, sample_rate=sample_rate, mode=mode)
         n = next_power_of_two(int(buffer_frames))
-        self._buf = {b: np.zeros(n, dtype=np.float32) for b in _BUFFERS}
+        self._buf = {b: array.array("f", bytes(4 * n)) for b in _BUFFERS}
         self._assign: dict[int, int] = {}
         # norns default: every voice reads/writes buffer 1 until reassigned.
         for i in range(1, self._n + 1):
@@ -175,9 +162,9 @@ class NornsSoftcut:
 
     def _apply(
         self,
-        buf: np.ndarray,
+        buf: Any,
         start_frame: int,
-        src: np.ndarray,
+        src: Any,
         preserve: float,
         mix: float,
         fade_frames: int,
@@ -187,22 +174,50 @@ class NornsSoftcut:
         Writes the smaller of ``len(src)`` and the buffer tail, never reallocating.
         ``env`` applies the optional edge fade. This one primitive backs read,
         copy and clear: read passes preserve/mix, copy passes mix=1, clear passes
-        an all-zero ``src`` with mix=0.
+        no ``src`` at all with mix=0.
+
+        The arithmetic lives in ``src/shared/buffer_ops.hpp`` and is shared with
+        the standalone server, so the two hosts cannot drift; it also drops the
+        GIL while looping, which a numpy expression of the same shape does not.
+        ``buf`` and ``src`` are passed through as they are -- any C-contiguous
+        float32 buffer, ndarray or not -- so callers hand over what they already
+        have rather than paying for a conversion.
         """
-        if start_frame < 0:  # a negative destination trims the source head
-            src = src[-start_frame:]
-            start_frame = 0
-        n = min(len(src), len(buf) - start_frame)
-        if n <= 0:
-            return
-        dst = buf[start_frame : start_frame + n]
-        s = src[:n]
-        env = _fade_env(n, fade_frames)
-        target = dst * float(preserve) + s * float(mix)
-        dst[:] = dst * (1.0 - env) + target * env
+        _core._buffer_apply(
+            buf,
+            int(start_frame),
+            src,
+            float(preserve),
+            float(mix),
+            int(fade_frames),
+        )
 
     def _frames(self, seconds: float) -> int:
         return int(round(float(seconds) * self.sample_rate))
+
+    @staticmethod
+    def _channel(
+        data: array.array,
+        channels: int,
+        col: int,
+        start_src: float,
+        dur: float,
+        file_sr: int,
+    ) -> array.array:
+        """One channel of an interleaved read, as a contiguous float32 buffer.
+
+        The de-interleave runs in C and pads anything outside the file with
+        silence, so a start past the end yields silence rather than an error --
+        which is what slicing a numpy view used to do here.
+        """
+        total = len(data) // channels if channels else 0
+        s0 = int(round(float(start_src) * file_sr))
+        avail = max(total - s0, 0)
+        n = avail if float(dur) < 0 else min(int(round(float(dur) * file_sr)), avail)
+        out = array.array("f", bytes(4 * max(n, 0)))
+        if n > 0:
+            _core._buffer_extract_channel(out, data, channels, col, s0, total)
+        return out
 
     def buffer_read_mono(
         self,
@@ -221,20 +236,11 @@ class NornsSoftcut:
         1-based file channel; ``ch_dst`` the target buffer. ``dur < 0`` reads to
         the end of the file.
         """
-        data, file_sr = read_wav(file)
-        col = min(max(int(ch_src), 1), data.shape[1]) - 1
-        s0 = int(round(float(start_src) * file_sr))
-        if float(dur) < 0:
-            src = data[s0:, col]
-        else:
-            src = data[s0 : s0 + int(round(float(dur) * file_sr)), col]
+        data, channels, file_sr = read_wav(file)
+        col = min(max(int(ch_src), 1), channels) - 1
+        src = self._channel(data, channels, col, start_src, dur, file_sr)
         self._apply(
-            self._buf[int(ch_dst)],
-            self._frames(start_dst),
-            np.ascontiguousarray(src, dtype=np.float32),
-            preserve,
-            mix,
-            0,
+            self._buf[int(ch_dst)], self._frames(start_dst), src, preserve, mix, 0
         )
 
     def buffer_read_stereo(
@@ -250,23 +256,12 @@ class NornsSoftcut:
 
         A mono file spreads its single channel to both buffers.
         """
-        data, file_sr = read_wav(file)
-        s0 = int(round(float(start_src) * file_sr))
+        data, channels, file_sr = read_wav(file)
         d0 = self._frames(start_dst)
         for b in _BUFFERS:
-            col = min(b, data.shape[1]) - 1
-            if float(dur) < 0:
-                src = data[s0:, col]
-            else:
-                src = data[s0 : s0 + int(round(float(dur) * file_sr)), col]
-            self._apply(
-                self._buf[b],
-                d0,
-                np.ascontiguousarray(src, dtype=np.float32),
-                preserve,
-                mix,
-                0,
-            )
+            col = min(b, channels) - 1
+            src = self._channel(data, channels, col, start_src, dur, file_sr)
+            self._apply(self._buf[b], d0, src, preserve, mix, 0)
 
     def buffer_write_mono(
         self,
@@ -295,25 +290,40 @@ class NornsSoftcut:
             end = s0 + self._frames(dur)
             a, b = self._buf[1][s0:end], self._buf[2][s0:end]
         n = min(len(a), len(b))
-        write_wav(file, np.stack([a[:n], b[:n]], axis=1), int(self.sample_rate))
+        # Interleave L/R for the writer. array.array assigns an extended slice
+        # from another array in C, so this costs one pass and no numpy.
+        frames = array.array("f", bytes(4 * 2 * n))
+        frames[0::2] = a[:n]
+        frames[1::2] = b[:n]
+        write_wav(file, frames, int(self.sample_rate), channels=2)
 
     def buffer_clear(self) -> None:
         """Zero both global buffers."""
         for b in _BUFFERS:
-            self._buf[b][:] = 0.0
+            self.buffer_clear_channel(b)
 
     def buffer_clear_channel(self, ch: int) -> None:
         """Zero buffer ``ch`` (1 or 2)."""
-        self._buf[int(ch)][:] = 0.0
+        self._clear_region(ch, 0.0, -1.0, 0.0, 0.0)
 
     def _clear_region(
         self, ch: int, start: float, dur: float, fade_time: float, preserve: float
     ) -> None:
+        # A clear is the same blended write with no source, so it costs no
+        # zero-filled array to pass in -- which for a whole-buffer clear was an
+        # allocation the size of the buffer.
         buf = self._buf[int(ch)]
         s0 = self._frames(start)
         cnt = (len(buf) - s0) if float(dur) < 0 else self._frames(dur)
-        zeros = np.zeros(max(cnt, 0), dtype=np.float32)
-        self._apply(buf, s0, zeros, preserve, 0.0, self._frames(fade_time))
+        _core._buffer_apply(
+            buf,
+            s0,
+            None,
+            float(preserve),
+            0.0,
+            self._frames(fade_time),
+            max(cnt, 0),
+        )
 
     def buffer_clear_region(
         self, start: float, dur: float, fade_time: float = 0.0, preserve: float = 0.0
@@ -353,7 +363,9 @@ class NornsSoftcut:
         src_buf = self._buf[int(src_ch)]
         ss = self._frames(start_src)
         cnt = (len(src_buf) - ss) if float(dur) < 0 else self._frames(dur)
-        src = np.array(src_buf[ss : ss + max(cnt, 0)], dtype=np.float32)  # copy
+        # Slicing an array.array copies, which is what keeps an overlapping
+        # in-buffer copy from aliasing, and a reversed slice is contiguous too.
+        src = src_buf[ss : ss + max(cnt, 0)]
         if reverse:
             src = src[::-1]
         self._apply(
@@ -388,7 +400,7 @@ class NornsSoftcut:
         return self._eng
 
     @property
-    def buffers(self) -> dict[int, np.ndarray]:
+    def buffers(self) -> dict[int, array.array]:
         """The two global buffer arrays, keyed by norns buffer number (1, 2)."""
         return self._buf
 
@@ -402,9 +414,9 @@ class NornsSoftcut:
         self._eng.stop()
         return self
 
-    def render(self, input: np.ndarray) -> np.ndarray:
+    def render(self, input: Any, out: Any = None) -> Any:
         """Offline: process a mono input block through all voices."""
-        return self._eng.render(input)
+        return self._eng.render(input, out)
 
 
 def _make_float_setter(attr: str):

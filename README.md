@@ -8,7 +8,7 @@ The primary API exposes softcut as idiomatic Python objects. An optional [norns-
 
 ## Concepts
 
-- **`Voice`** wraps one `softcut::Voice`: a crossfading read/write head over an audio buffer, with rate, loop points, record/play, fades, and pre/post state-variable filters. Parameters are plain attributes; the buffer is a numpy `float32` array **you** own (softcut-lib never allocates buffer memory). Buffer length must be a power of two — use `softcut.next_power_of_two` or `Engine.allocate`, which rounds up for you. The same array can be shared by several voices.
+- **`Voice`** wraps one `softcut::Voice`: a crossfading read/write head over an audio buffer, with rate, loop points, record/play, fades, and pre/post state-variable filters. Parameters are plain attributes; the buffer is a `float32` buffer **you** own (softcut-lib never allocates buffer memory) — anything C-contiguous, so an `array.array("f")`, a `memoryview`, or a numpy array. Buffer length must be a power of two — use `softcut.next_power_of_two` or `Engine.allocate`, which rounds up for you. The same array can be shared by several voices.
 
 - **`Engine`** is the multi-voice host: it owns a set of voices and a miniaudio device, and runs them either live (realtime mic/speaker I/O on a background audio thread) or offline via `Engine.render`. It is a context manager and a sequence of voices.
 
@@ -36,7 +36,7 @@ with softcut.Engine(voices=2) as eng:          # opens the audio device
 
 ## Offline rendering
 
-No device; process a mono numpy block through the voices and get the mixed stereo output back. This is the deterministic path used by the tests:
+No device; process a mono block through the voices and get the mixed stereo output back. This is the deterministic path used by the tests:
 
 ```python
 import numpy as np, softcut
@@ -52,6 +52,18 @@ out = eng.render(np.random.randn(48000).astype(np.float32))   # (48000, 2) float
 ```
 
 Load/save audio with whatever you like (e.g. `soundfile`) and assign the array to `voice.buffer`.
+
+## Dependencies
+
+The package has **no required runtime dependencies**. Buffers are `array.array("f")` and every entry point takes any C-contiguous float32 buffer, so numpy arrays work everywhere they did before — they are simply no longer necessary. The sample-level buffer arithmetic and the WAV sample-format conversion run in C++ (shared with the standalone server), and `wave` from the standard library parses the container.
+
+numpy is needed for exactly one thing: `Engine.render` and `Voice.process` allocate their result as an `(n, out_channels)` ndarray. Pass `out=` — a flat buffer of `n * out_channels` float32 samples, written in place and returned — and nothing imports numpy at all.
+
+```console
+$ pip install softcut-py            # no dependencies
+$ pip install softcut-py[numpy]     # + the ndarray return from render/process
+$ pip install softcut-py[osc]       # + the pure-Python OSC transport
+```
 
 ## Routing and devices
 
@@ -77,7 +89,7 @@ For porting norns scripts (and the muscle memory that goes with them), `softcut.
 from softcut import norns as softcut
 
 softcut.buffer_clear()
-softcut.buffer_read_mono("loop.wav", ch_dst=1)   # numpy + stdlib wave, no extra dep
+softcut.buffer_read_mono("loop.wav", ch_dst=1)   # stdlib wave, no extra dep
 softcut.loop(1, 1)
 softcut.loop_start(1, 0.0)
 softcut.loop_end(1, 4.0)
@@ -90,7 +102,7 @@ softcut.start()                                  # open the audio device
 
 - **Attribute passthrough** — `rate`, `level`, `pan`, `play`/`rec`/`loop`, loop points, `position`, the pre/post filters, slews, phase, `buffer`, `voice_sync`, `level_cut_cut`, `reset`.
 
-- **Buffer/disk ops** — `buffer_read_*` / `buffer_write_*`, `buffer_copy_*`, `buffer_clear*`, in pure numpy plus the standard-library `wave` module (WAV only, no new dependency), with preserve/mix crossfade, edge `fade_time` and `reverse`. Operations write in place, so they are safe against the running audio thread; reads are non-resampling, matching norns.
+- **Buffer/disk ops** — `buffer_read_*` / `buffer_write_*`, `buffer_copy_*`, `buffer_clear*`, on the shared C++ buffer primitives plus the standard-library `wave` module (WAV only, no new dependency), with preserve/mix crossfade, edge `fade_time` and `reverse`. Operations write in place, so they are safe against the running audio thread; reads are non-resampling, matching norns.
 
 `softcut.render` / `softcut.start` / `softcut.stop` drive audio (norns runs its audio continuously; here you render offline or open the device explicitly). Phase polling and per-sample level/pan slews are not yet implemented; see [`docs/dev/norns-api.md`](docs/dev/norns-api.md) for the full mapping and status. `demos/12_norns_api.py` is a narrated walkthrough built entirely on this layer.
 
@@ -132,7 +144,7 @@ The full namespace is mirrored: all `/set/param/cut/*` params, routing (`/set/le
 
 **Two transports**, selected by `backend=` ("auto" by default):
 
-- **python-osc** — the default pure-Python transport. Install the optional extra: `pip install softcut-py[osc]`. The core package stays numpy-only.
+- **python-osc** — the default pure-Python transport. Install the optional extra: `pip install softcut-py[osc]`.
 
 - **native** (**experimental**) — a dependency-free UDP transport built on the vendored [tinyosc](https://github.com/mhroth/tinyosc) codec. It is **not** compiled into the published wheels; opt in with a source build (`SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" pip install .` or `make build-tinyosc`; reported by `softcut._core.HAVE_TINYOSC`). Per-voice `/set/param/cut/*` messages are parsed **and dispatched entirely in C without the GIL** — via a second single-producer command queue drained on the audio thread plus atomic parameter mirrors — and the phase poll runs in C too, so a busy Python interpreter can neither delay nor be delayed by the native control path (other addresses fall back to a Python handler). It is IPv4-only and less battle-tested than python-osc; prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.
 

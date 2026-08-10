@@ -1479,13 +1479,13 @@ wheels = [
 name = "softcut-py"
 version = "0.3.0"
 source = { editable = "." }
-dependencies = [
+
+[package.optional-dependencies]
+numpy = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-
-[package.optional-dependencies]
 osc = [
     { name = "python-osc" },
 ]
@@ -1493,6 +1493,9 @@ osc = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "py2tosc" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1507,14 +1510,15 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "numpy", specifier = ">=1.21" },
+    { name = "numpy", marker = "extra == 'numpy'", specifier = ">=1.21" },
     { name = "python-osc", marker = "extra == 'osc'", specifier = ">=1.8" },
 ]
-provides-extras = ["osc"]
+provides-extras = ["numpy", "osc"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.19.1" },
+    { name = "numpy", specifier = ">=1.21" },
     { name = "py2tosc", specifier = ">=0.3.2" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },

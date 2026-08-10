@@ -92,6 +92,11 @@ def server():
 # --- reading the layout back ------------------------------------------------
 
 
+def buf(host, index):
+    """A writable numpy view of a norns buffer (a stdlib `array.array("f")`)."""
+    return np.asarray(host.buffers[index])
+
+
 def bindings(document):
     """Every OSC binding in the layout, as ``(control, message)`` pairs."""
     for control in document.walk():
@@ -357,9 +362,9 @@ def test_disk_buttons_carry_a_path_and_read_into_the_buffer(
 ):
     """The read button's constant path argument reaches the host's WAV reader."""
     host = server.host
-    host.buffers[1][:] = 1.0
+    buf(host, 1)[:] = 1.0
     address, message = sent_by(document, "read_mono")[0]
     args = arguments_of(message)
     assert args[0] == str(audio_file)
     server._handlers[address](address, *args)
-    assert host.buffers[1][: int(0.05 * SR)].max() == 0.0  # the silent file landed
+    assert buf(host, 1)[: int(0.05 * SR)].max() == 0.0  # the silent file landed

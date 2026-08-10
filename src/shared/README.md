@@ -15,6 +15,7 @@ as `#include "shared/…"`; the namespace is `scsh`.
 | `osc_socket.hpp` | Cross-platform IPv4 UDP socket helpers (`socket_t`, `make_sockaddr`, …) plus the platform network headers. Used only where OSC is compiled in. |
 | `mixer.hpp` | `scsh::VoiceMix` + `process_block()` — the multi-voice mix (per-voice input gain, voice→voice feedback, equal-power pan). Each host refreshes a `VoiceMix` view from its own Voice objects each block. |
 | `device.hpp` | miniaudio device-id resolution and config building (`resolve_device_ids`, `make_device_config`). |
+| `buffer_ops.hpp` | `scsh::apply_to_buffer` and friends -- the sample-level arithmetic every buffer operation (read, copy, clear) reduces to, plus the edge-fade envelope, de-interleaving and 16-bit quantization. Bound into Python as `_core._buffer_apply` / `_buffer_extract_channel`. |
 
 ## What is deliberately *not* shared
 
@@ -26,6 +27,10 @@ as `#include "shared/…"`; the namespace is `scsh`.
   restartable and returns the device list to Python as a list of dicts; the
   standalone re-inits per start and adds a `--null` headless backend and a
   text-printing lister. Only the mechanical config/selection is shared (above).
+- **The buffer *disk* layer.** `clients/softcut-osc/buffer_io.hpp` builds on
+  `buffer_ops.hpp` but needs dr_wav and that host's own `Engine` type, neither of
+  which the extension compiles; softcut-py reads and writes WAV through numpy and
+  the stdlib `wave` module instead. Only the arithmetic underneath is shared.
 - **The OSC param dispatch tables.** Both map `/set/param/cut/*` to the same
   `softcut::Voice` setters, but the extension's fast path also binds each address
   to an atomic mirror field (a `Voice::*` pointer into the Python wrapper) that

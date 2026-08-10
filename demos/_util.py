@@ -15,12 +15,23 @@ from pathlib import Path
 import numpy as np
 
 import softcut
-from softcut._wavio import read_wav_mono as load_wav_mono  # noqa: F401
+from softcut._wavio import read_wav_mono as _read_wav_mono
 from softcut._wavio import write_wav  # noqa: F401
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tests" / "data"
 OUT = ROOT / "build" / "out"  # out-of-source; cleaned by `make clean`
+
+
+def load_wav_mono(path: str | Path) -> tuple[np.ndarray, int]:
+    """A WAV as mono float32, summed across channels.
+
+    `softcut._wavio` hands back a stdlib `array.array` -- the library keeps numpy
+    optional -- and the demos are written in numpy, so this is where the two
+    meet. `np.asarray` wraps the buffer without copying it.
+    """
+    data, sr = _read_wav_mono(path)
+    return np.asarray(data, dtype=np.float32), sr
 
 
 def to_buffer(samples: np.ndarray) -> np.ndarray:
