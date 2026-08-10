@@ -12,7 +12,9 @@ While the device is **running**, a voice's DSP parameter change from Python is n
 
 - `stop()` drains any commands still queued, so the final state is consistent.
 
-This covers the softcut DSP parameters (rate, loop, record/play, fades, slews, filters, phase, `cut_to`, `stop`, `reset`). The engine-mix scalars (`level`, `pan`, `input_gain`) and the feedback matrix are plain aligned writes — a concurrent read is at worst stale by one block, which is inaudible.
+This covers the softcut DSP parameters (rate, loop, record/play, fades, slews, filters, phase, `cut_to`, `stop`, `reset`). The engine-mix scalars (`level`, `pan`, `input_gain`) and the feedback matrix are relaxed atomics rather than queued — a concurrent read is at worst stale by one block, which is inaudible, and being atomic makes that a defined outcome rather than a data race.
+
+If the queue fills — which needs more than 4096 changes inside one block period, roughly 380,000 per second at 512 frames / 48 kHz — the setter waits for the audio thread's next drain rather than applying the change itself. Applying it there would mutate state the audio thread is reading, which is the race the queue exists to prevent. A change that still cannot be queued after about two block periods is dropped and counted on `Voice.dropped_commands`; anything nonzero there means control changes were lost.
 
 ```python
 import softcut, time

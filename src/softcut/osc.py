@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import threading
 import weakref
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from . import _core
 from .norns import NornsSoftcut
@@ -204,6 +204,13 @@ class SoftcutOSC:
         self._quit = threading.Event()
         self._handlers = self._build_handlers()
 
+        # Either implementation may fill these, so they are declared once:
+        # the Python poll and sender, or the C ones the native backend owns.
+        self._server: Any
+        self._receiver: Any
+        self._sender: Any
+        self._phase: Any
+
         if self.backend == "native":
             # Native outbound: a C phase-poll thread reads quant_phase and sends
             # the reply entirely in C, so no periodic GIL holder remains. It owns
@@ -221,10 +228,10 @@ class SoftcutOSC:
             # (nanobind objects do not participate in Python's cyclic GC).
             weak = weakref.ref(self)
 
-            def native_cb(address: str, args: object, _weak=weak) -> None:
+            def native_cb(address: str, args: Any, _weak=weak) -> None:
                 s = _weak()
                 if s is not None:
-                    s._dispatch(address, list(args))  # type: ignore[arg-type]
+                    s._dispatch(address, list(args))
 
             # Hand the low-level engine to the receiver so per-voice
             # /set/param/cut/* messages dispatch in C without the GIL; the
@@ -233,7 +240,7 @@ class SoftcutOSC:
                 listen_host, listen_port, native_cb, self.host.engine._core
             )
             self._server = None
-            self._thread = None
+            self._thread: Optional[threading.Thread] = None
         else:
             dispatcher = Dispatcher()
             dispatcher.set_default_handler(
@@ -274,11 +281,15 @@ class SoftcutOSC:
     def server_address(self) -> tuple[str, int]:
         """The bound (host, port) the server is listening on."""
         if self.backend == "native":
-            return (self._listen_host, self._receiver.port)
-        return self._server.server_address
+            assert self._receiver is not None  # set for this backend
+            return (self._listen_host, int(self._receiver.port))
+        assert self._server is not None
+        host, port = self._server.server_address[:2]
+        return (str(host), int(port))
 
     @property
-    def phase_poll(self) -> _PhasePoll:
+    def phase_poll(self) -> Any:
+        """The phase reporter: `_PhasePoll`, or the C one on the native backend."""
         return self._phase
 
     @property
@@ -297,6 +308,7 @@ class SoftcutOSC:
             self.start()
             self.wait_for_quit()
         else:
+            assert self._server is not None
             self._server.serve_forever()
 
     def wait_for_quit(self, poll: float = 0.25) -> None:
@@ -307,10 +319,12 @@ class SoftcutOSC:
     def start(self) -> "SoftcutOSC":
         """Serve OSC on a background thread and return immediately."""
         if self.backend == "native":
+            assert self._receiver is not None
             self._receiver.start()
             return self
         if self._thread is not None and self._thread.is_alive():
             return self
+        assert self._server is not None
         self._thread = threading.Thread(
             target=self._server.serve_forever, name="softcut-osc", daemon=True
         )
@@ -321,10 +335,12 @@ class SoftcutOSC:
         """Stop the phase poll and the server, releasing the socket."""
         self._phase.stop()
         if self.backend == "native":
+            assert self._receiver is not None
             self._receiver.stop()
             return self
         # python-osc: BaseServer.shutdown() blocks until serve_forever
         # acknowledges, so only call it when the serve loop is running.
+        assert self._server is not None
         if self._thread is not None:
             self._server.shutdown()
             self._thread.join(timeout=1.0)
@@ -406,7 +422,7 @@ class SoftcutOSC:
     def _v_f(method: Callable[[int, float], None]) -> Handler:
         """``(voice, float)`` -> ``method(voice + 1, float)`` (0-based wire)."""
 
-        def h(address: str, *args: object) -> None:
+        def h(address: str, *args: Any) -> None:
             v, x = args[0], args[1]
             method(int(v) + 1, float(x))  # type: ignore[arg-type]
 
@@ -416,7 +432,7 @@ class SoftcutOSC:
     def _ii_f(method: Callable[[int, int, float], None]) -> Handler:
         """``(i0, i1, float)`` -> ``method(i0 + 1, i1 + 1, float)``."""
 
-        def h(address: str, *args: object) -> None:
+        def h(address: str, *args: Any) -> None:
             a, b, x = args[0], args[1], args[2]
             method(int(a) + 1, int(b) + 1, float(x))  # type: ignore[arg-type]
 
@@ -424,7 +440,7 @@ class SoftcutOSC:
 
     @staticmethod
     def _unsupported(name: str) -> Handler:
-        def h(address: str, *args: object) -> None:
+        def h(address: str, *args: Any) -> None:
             _log.debug("unsupported OSC message ignored: %s %r", name, args)
 
         return h
@@ -435,18 +451,18 @@ class SoftcutOSC:
         # No per-voice idle-disable in the core; approximate enable with play.
         self.host.play(i, bool(state))
 
-    def _on_in_cut(self, address: str, *args: object) -> None:
+    def _on_in_cut(self, address: str, *args: Any) -> None:
         # Reference: (in_channel, voice, level). The core has only a scalar
         # per-voice input gain (mono duplex), not a per-channel ADC matrix, so
         # the input channel is ignored.
         _in_ch, v, level = args[0], args[1], args[2]
         self.host.engine[int(v)].input_gain = float(level)  # type: ignore[arg-type]
 
-    def _on_buffer(self, address: str, *args: object) -> None:
+    def _on_buffer(self, address: str, *args: Any) -> None:
         v, b = args[0], args[1]
         self.host.buffer(int(v) + 1, int(b) + 1)  # type: ignore[arg-type]
 
-    def _on_read_mono(self, address: str, *args: object) -> None:
+    def _on_read_mono(self, address: str, *args: Any) -> None:
         path = str(args[0])
         start_src = float(args[1]) if len(args) > 1 else 0.0
         start_dst = float(args[2]) if len(args) > 2 else 0.0
@@ -457,34 +473,34 @@ class SoftcutOSC:
             path, start_src, start_dst, dur, ch_src + 1, ch_dst + 1
         )
 
-    def _on_read_stereo(self, address: str, *args: object) -> None:
+    def _on_read_stereo(self, address: str, *args: Any) -> None:
         path = str(args[0])
         start_src = float(args[1]) if len(args) > 1 else 0.0
         start_dst = float(args[2]) if len(args) > 2 else 0.0
         dur = float(args[3]) if len(args) > 3 else -1.0
         self.host.buffer_read_stereo(path, start_src, start_dst, dur)
 
-    def _on_write_mono(self, address: str, *args: object) -> None:
+    def _on_write_mono(self, address: str, *args: Any) -> None:
         path = str(args[0])
         start = float(args[1]) if len(args) > 1 else 0.0
         dur = float(args[2]) if len(args) > 2 else -1.0
         ch = int(args[3]) if len(args) > 3 else 0  # type: ignore[arg-type]
         self.host.buffer_write_mono(path, start, dur, ch + 1)
 
-    def _on_write_stereo(self, address: str, *args: object) -> None:
+    def _on_write_stereo(self, address: str, *args: Any) -> None:
         path = str(args[0])
         start = float(args[1]) if len(args) > 1 else 0.0
         dur = float(args[2]) if len(args) > 2 else -1.0
         self.host.buffer_write_stereo(path, start, dur)
 
-    def _on_clear_channel(self, address: str, *args: object) -> None:
+    def _on_clear_channel(self, address: str, *args: Any) -> None:
         self.host.buffer_clear_channel(int(args[0]) + 1)  # type: ignore[arg-type]
 
-    def _on_clear_region(self, address: str, *args: object) -> None:
+    def _on_clear_region(self, address: str, *args: Any) -> None:
         start, dur = float(args[0]), float(args[1])
         self.host.buffer_clear_region(start, dur)
 
-    def _on_clear_region_channel(self, address: str, *args: object) -> None:
+    def _on_clear_region_channel(self, address: str, *args: Any) -> None:
         ch, start, dur = int(args[0]), float(args[1]), float(args[2])  # type: ignore[arg-type]
         self.host.buffer_clear_region_channel(ch + 1, start, dur)
 

@@ -65,7 +65,7 @@ format:
 
 # Type check with mypy
 typecheck:
-	@uv run mypy src/softcut/__init__.py tests/ --exclude '.venv'
+	@uv run mypy src/softcut/ tests/ --exclude '.venv'
 
 # Run a full quality assurance check
 qa: test lint typecheck format

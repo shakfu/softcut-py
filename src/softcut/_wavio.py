@@ -95,7 +95,9 @@ def write_wav(
 
     view = memoryview(data)
     if channels is None:
-        channels = view.shape[1] if view.ndim == 2 else 1
+        # `shape` is Optional only for a released buffer, which this is not.
+        shape = view.shape
+        channels = shape[1] if view.ndim == 2 and shape is not None else 1
     # Flatten to 1-D float32 for the encoder; `cast` demands C-contiguity, which
     # is what the encoder needs anyway.
     flat = view.cast("B").cast("f")

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.2]
+
+### Added
+
+- `Voice.dropped_commands`: control changes lost because the audio thread's command queue stayed full. Nonzero means the engine is being driven faster than it drains.
+
+### Fixed
+
+- Three review findings on realtime safety and packaging:
+
+  - **The engine-mix state is no longer a data race.** `Voice.level`, `pan` and `input_gain`, and the feedback matrix, were plain floats written from Python while the audio thread read them — benign in practice on any platform softcut targets, but undefined behaviour by the standard. They are relaxed atomics now, which compiles to the same instruction and makes the documented "at worst one block stale" an actual guarantee.
+  
+  - **A full command queue no longer falls back to applying the change on the calling thread**, which was exactly the cross-thread mutation the queue exists to prevent. The setter now waits for the audio thread's next drain, and if space never comes it drops the change and counts it on the new `Voice.dropped_commands`. The wait had to be a real sleep: a yield-spin returns in microseconds while a drain is a block period away, and measurably still dropped 19 of a 5000-change burst.
+
+  - **The shipped type stubs no longer import numpy**, which a package declaring no dependencies must not do — `mypy --no-site-packages` failed on the package's own `_core.pyi`.
+
+- `make typecheck` was only checking one of the five modules. It ran mypy on `src/softcut/__init__.py`, whose errors in imported modules mypy suppresses; `osc.py` and `_wavio.py` were never reported on. It now checks `src/softcut/`, and the 74 diagnostics that surfaced are fixed — mostly one root cause, OSC handler arguments typed `object` rather than `Any` when the wire protocol makes them dynamic, plus unnarrowed optional transport members and two `_core` symbols missing from the stub.
+
 ## [0.4.1]
 
 ### Added

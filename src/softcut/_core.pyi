@@ -1,15 +1,17 @@
 """Type stubs for the softcut._core nanobind extension."""
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, TypeAlias
 from contextlib import AbstractContextManager
 
-from numpy.typing import NDArray
-import numpy as np
-
-# Anything exposing a C-contiguous float32 buffer: an ndarray, an array.array,
-# a memoryview. The bindings take the buffer protocol, not numpy specifically.
-Buffer = NDArray[np.float32] | memoryview | Sequence[float]
+# Anything exposing a C-contiguous float32 buffer: an `array.array("f")`, a
+# `memoryview`, a numpy array. There is no static type for that -- the buffer
+# protocol only became expressible as `collections.abc.Buffer` in 3.12, and even
+# that says nothing about dtype or contiguity -- so this is `Any` rather than a
+# union. It must not name numpy: these stubs ship in a package that does not
+# depend on it, and an unconditional numpy import here fails type-checking for
+# anyone who does not have it installed.
+Buffer: TypeAlias = Any
 
 class Voice:
     """A single softcut DSP voice over a caller-owned float32 buffer."""
@@ -112,6 +114,30 @@ class _Engine:
     def get_feedback(self, src: int, dst: int) -> float: ...
 
 def list_devices() -> list[dict]: ...
+
+# Present only when built with SOFTCUT_ENABLE_TINYOSC (the default). Guarded at
+# runtime by HAVE_TINYOSC / softcut.osc.NATIVE_OSC_AVAILABLE.
+HAVE_TINYOSC: bool
+
+class _OscReceiver:
+    def __init__(
+        self, host: str, port: int, callback: Any, engine: Any = ..., /
+    ) -> None: ...
+    @property
+    def port(self) -> int: ...
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+
+class _OscPhasePoll:
+    def __init__(
+        self, engine: Any, reply_host: str, reply_port: int, period: float, /
+    ) -> None: ...
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def reset(self) -> None: ...
+    def poll_once(self) -> None: ...
+    @property
+    def running(self) -> bool: ...
 
 # Shared buffer arithmetic (src/shared/buffer_ops.hpp). Any C-contiguous float32
 # buffer is accepted -- ndarray, array.array, memoryview -- and written in place.

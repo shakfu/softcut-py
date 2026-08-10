@@ -209,6 +209,6 @@ CI runs QA and a Linux/macOS/Windows build smoke on every push and pull request.
 
 ## Notes
 
-- Realtime parameter updates are safe: while the device is running, voice DSP parameter changes from Python are enqueued and applied on the audio thread via a lock-free queue rather than racing it. (The mix scalars `level`/`pan`/ `input_gain` and the feedback matrix are plain aligned writes.)
+- Realtime parameter updates are safe: while the device is running, voice DSP parameter changes from Python are enqueued and applied on the audio thread via a lock-free queue rather than racing it. A full queue makes the setter wait for the next drain and, failing that, drop the change and count it on `Voice.dropped_commands` — never apply it off-thread. (The mix scalars `level`/`pan`/`input_gain` and the feedback matrix are relaxed atomics instead of queued: a read is at worst one block stale.)
 
 - The vendored `softcut-lib` carries small host-portability fixes (uninitialized members that relied on embedded zero-init static storage — including the phase quantum and the two phase mirrors the poll reports from — and an oversized debug buffer stubbed out); see the comments in `thirdparty/softcut-lib`.

@@ -22,6 +22,7 @@
 #include <cstring>
 #include <functional>
 #include <optional>
+#include <thread>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -46,7 +47,6 @@
 #include <condition_variable>
 #include <limits>
 #include <mutex>
-#include <thread>
 #include <chrono>
 #include <cstring>
 #endif
@@ -105,9 +105,16 @@ struct Voice {
     // Engine mix parameters (not softcut params): read by Engine's mixer.
     // level is a linear gain; pan is -1 (left) .. 0 (center) .. +1 (right).
     // input_gain scales the engine's external input fed into this voice.
-    float level_ = 1.0f;
-    float pan_ = 0.0f;
-    float input_gain_ = 1.0f;
+    //
+    // Atomic because the audio thread reads them while Python writes them: the
+    // public API and the OSC layer both allow adjusting these live. Every access
+    // is relaxed, which on the platforms softcut-py targets is the same
+    // instruction a plain float would compile to -- the point is not ordering
+    // but that a concurrent read is defined behaviour rather than a data race.
+    // The observable behaviour is unchanged: a read is at worst one block stale.
+    std::atomic<float> level_{1.0f};
+    std::atomic<float> pan_{0.0f};
+    std::atomic<float> input_gain_{1.0f};
 
     // Set when the voice is hosted by an Engine. While the engine is running,
     // DSP setters are applied on the audio thread via a command queue. There are
@@ -119,15 +126,48 @@ struct Voice {
     CommandQueue *osc_queue_ = nullptr;
     std::atomic<bool> *engine_running_ = nullptr;
 
+    // How long to wait for space before giving up on a full command queue.
+    //
+    // The audio thread drains the whole queue once per block, so waiting is only
+    // ever waiting for the next callback -- and it has to be a real wait: a
+    // yield-spin returns in microseconds while a block is milliseconds, so it
+    // gives up long before the drain it is waiting for. 100 x 250us covers about
+    // two block periods at 512 frames / 48 kHz, and costs nothing at all unless
+    // the queue is genuinely full, which needs >4096 changes inside one block.
+    static constexpr int kPushAttempts = 100;
+    static constexpr std::chrono::microseconds kPushWait{250};
+
+    // Commands dropped because the queue stayed full. Nonzero means control
+    // changes were lost -- the engine is being driven faster than the audio
+    // thread drains, or the device stopped calling back.
+    std::atomic<uint64_t> dropped_commands_{0};
+
+    // Push with a bounded retry, counting a drop if it never lands.
+    //
+    // The alternative -- applying the change here when the queue is full -- is
+    // what this deliberately does not do: it would mutate DSP state on the
+    // producer thread while the audio thread reads it, which is precisely the
+    // race the queue exists to prevent. A lost parameter update is recoverable
+    // (the next one supersedes it, and every softcut set is idempotent); a torn
+    // one is not, and it is silent.
+    bool queue_apply(CommandQueue *queue, const std::function<void()> &fn) {
+        for (int attempt = 0; attempt < kPushAttempts; ++attempt) {
+            if (queue->push(fn)) return true;
+            std::this_thread::sleep_for(kPushWait);
+        }
+        dropped_commands_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
     // Apply a softcut DSP change now, or defer it to the audio thread if an
     // engine is running (so the audio thread never reads a half-written param).
     void dsp_apply(std::function<void()> fn) {
         if (engine_running_ != nullptr &&
-            engine_running_->load(std::memory_order_acquire) &&
-            cmd_queue_->push(fn)) {
+            engine_running_->load(std::memory_order_acquire)) {
+            queue_apply(cmd_queue_, fn);
             return;
         }
-        fn();
+        fn();  // no audio thread to race: apply directly
     }
 
     // Like dsp_apply, but posts to the native OSC receiver's dedicated queue.
@@ -135,7 +175,8 @@ struct Voice {
     void osc_apply(std::function<void()> fn) {
         if (engine_running_ != nullptr &&
             engine_running_->load(std::memory_order_acquire) &&
-            osc_queue_ != nullptr && osc_queue_->push(fn)) {
+            osc_queue_ != nullptr) {
+            queue_apply(osc_queue_, fn);
             return;
         }
         fn();
@@ -281,7 +322,11 @@ struct Engine {
 
     std::vector<float> silence;   // zeroed mono input for playback / no input
     std::vector<float> voice_in;  // per-voice input scratch (block_size)
-    std::vector<float> fb;        // feedback matrix, fb[src*n_voices + dst]
+    // Feedback matrix, fb[src*n_voices + dst]. Atomic for the same reason as the
+    // mix scalars; the shared mixer takes a plain `const float *`, so each block
+    // snapshots it into fb_snap rather than the mixer learning about atomics.
+    std::vector<std::atomic<float>> fb;
+    std::vector<float> fb_snap;
     std::vector<float> prev_out;  // last block's per-voice output (n*block_size)
     std::vector<float> cur_out;   // this block's per-voice output (n*block_size)
     std::vector<scsh::VoiceMix> mix;  // per-block voice view (refreshed each block)
@@ -305,7 +350,10 @@ struct Engine {
         if (out_channels < 1) throw std::invalid_argument("out_channels must be >= 1");
         silence.assign(block_size, 0.0f);
         voice_in.assign(block_size, 0.0f);
-        fb.assign(static_cast<size_t>(n_voices) * n_voices, 0.0f);
+        // vector's fill constructor value-initializes, which zeroes an atomic
+        // even in C++17 where its default constructor does not.
+        fb = std::vector<std::atomic<float>>(static_cast<size_t>(n_voices) * n_voices);
+        fb_snap.assign(static_cast<size_t>(n_voices) * n_voices, 0.0f);
         prev_out.assign(static_cast<size_t>(n_voices) * block_size, 0.0f);
         cur_out.assign(static_cast<size_t>(n_voices) * block_size, 0.0f);
         mix.resize(static_cast<size_t>(n_voices));
@@ -344,10 +392,15 @@ struct Engine {
         // run the shared mixer. GIL-free and allocation-free.
         for (int i = 0; i < n_voices; ++i) {
             Voice *vp = voices[i];
-            mix[static_cast<size_t>(i)] = {&vp->v, vp->level_, vp->pan_, vp->input_gain_};
+            mix[static_cast<size_t>(i)] = {&vp->v,
+                                           vp->level_.load(std::memory_order_relaxed),
+                                           vp->pan_.load(std::memory_order_relaxed),
+                                           vp->input_gain_.load(std::memory_order_relaxed)};
         }
+        for (size_t i = 0; i < fb.size(); ++i)
+            fb_snap[i] = fb[i].load(std::memory_order_relaxed);
         scsh::process_block(mix.data(), n_voices, block_size, out_channels,
-                            fb.data(), ext_in, out, frames, voice_in.data(),
+                            fb_snap.data(), ext_in, out, frames, voice_in.data(),
                             prev_out.data(), cur_out.data());
         std::swap(prev_out, cur_out);  // this block's outputs feed the next
     }
@@ -355,13 +408,15 @@ struct Engine {
     void set_feedback(int src, int dst, float amount) {
         if (src < 0 || src >= n_voices || dst < 0 || dst >= n_voices)
             throw std::out_of_range("voice index out of range");
-        fb[static_cast<size_t>(src) * n_voices + dst] = amount;
+        fb[static_cast<size_t>(src) * n_voices + dst].store(amount,
+                                                           std::memory_order_relaxed);
     }
 
     float get_feedback(int src, int dst) const {
         if (src < 0 || src >= n_voices || dst < 0 || dst >= n_voices)
             throw std::out_of_range("voice index out of range");
-        return fb[static_cast<size_t>(src) * n_voices + dst];
+        return fb[static_cast<size_t>(src) * n_voices + dst].load(
+            std::memory_order_relaxed);
     }
 
     // Called from miniaudio's audio thread. Chunks frameCount to block_size.
@@ -958,17 +1013,22 @@ NB_MODULE(_core, m) {
         .FPROP("post_filter_dry", post_filter_dry_, setPostFilterDry)
 
         // engine mix (used by Engine; ignored by standalone Voice.process)
+        .def_prop_ro("dropped_commands",
+            [](Voice &s) { return s.dropped_commands_.load(std::memory_order_relaxed); },
+            "Control changes lost because the audio thread's command queue stayed "
+            "full. Nonzero means the engine is being driven faster than it drains; "
+            "those changes were dropped rather than applied off-thread.")
         .def_prop_rw("level",
-            [](Voice &s) { return s.level_; },
-            [](Voice &s, float x) { s.level_ = x; },
+            [](Voice &s) { return s.level_.load(std::memory_order_relaxed); },
+            [](Voice &s, float x) { s.level_.store(x, std::memory_order_relaxed); },
             "Output level (linear gain) applied when mixed by an Engine.")
         .def_prop_rw("pan",
-            [](Voice &s) { return s.pan_; },
-            [](Voice &s, float x) { s.pan_ = x; },
+            [](Voice &s) { return s.pan_.load(std::memory_order_relaxed); },
+            [](Voice &s, float x) { s.pan_.store(x, std::memory_order_relaxed); },
             "Stereo pan, -1 (left) to +1 (right), applied by an Engine mixer.")
         .def_prop_rw("input_gain",
-            [](Voice &s) { return s.input_gain_; },
-            [](Voice &s, float x) { s.input_gain_ = x; },
+            [](Voice &s) { return s.input_gain_.load(std::memory_order_relaxed); },
+            [](Voice &s, float x) { s.input_gain_.store(x, std::memory_order_relaxed); },
             "Gain applied to the engine's external input fed into this voice.")
 
         // read-only state

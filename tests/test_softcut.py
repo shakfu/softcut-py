@@ -272,6 +272,50 @@ def test_reset_restores_the_parameter_read_backs():
     assert v.level == pytest.approx(0.25)
 
 
+def test_dropped_commands_starts_at_zero_and_is_read_only():
+    """The overflow counter is the visible half of the queue's drop policy.
+
+    A full queue drops the update and counts it rather than applying it on the
+    calling thread, which would race the audio thread reading the same field.
+    Nonzero here means control changes were lost.
+    """
+    v, _ = make_voice()
+    assert v.dropped_commands == 0
+    v.rate = 2.0  # no engine: applied directly, nothing queued
+    assert v.dropped_commands == 0
+    with pytest.raises(AttributeError):
+        v.dropped_commands = 1
+
+
+@pytest.mark.skipif(
+    not os.environ.get("SOFTCUT_TEST_AUDIO"),
+    reason="set SOFTCUT_TEST_AUDIO=1 to exercise a real audio device",
+)
+def test_a_burst_of_live_parameter_changes_is_not_dropped():
+    """The bounded retry should absorb a realistic control burst.
+
+    This is the case the drop policy exists for: with the device running, every
+    set goes through the queue. If this starts failing, either the queue is too
+    small or the retry too short for the burst rates callers actually use.
+    """
+    import time
+
+    eng = Engine(voices=1, sample_rate=SR)
+    eng.allocate(seconds=1.0)
+    try:
+        eng.start()
+    except RuntimeError as exc:
+        pytest.skip(f"no audio device available: {exc}")
+    try:
+        for i in range(5000):
+            eng[0].rate = 1.0 + (i % 8) * 0.01
+        time.sleep(0.1)
+    finally:
+        eng.stop()
+
+    assert eng[0].dropped_commands == 0
+
+
 def test_actions_do_not_raise():
     v, _ = make_voice()
     v.play = True

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import array
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from softcut import Engine, next_power_of_two
 from softcut import _core
@@ -116,6 +116,12 @@ class NornsSoftcut:
         # norns default: every voice reads/writes buffer 1 until reassigned.
         for i in range(1, self._n + 1):
             self.buffer(i, 1)
+
+    if TYPE_CHECKING:  # pragma: no cover - typing only
+        # Every name in _FLOAT_PARAMS and _BOOL_PARAMS is generated onto this
+        # class below, so a type checker reading the source sees none of them.
+        # The signature is uniform: softcut.<param>(voice, value).
+        def __getattr__(self, name: str) -> Callable[..., None]: ...
 
     # --- voice access ----------------------------------------------------
 
