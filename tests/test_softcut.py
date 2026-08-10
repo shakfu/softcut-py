@@ -245,6 +245,33 @@ def test_quant_phase_tracks_the_quantum():
     assert quantized <= v.position
 
 
+def test_reset_restores_the_parameter_read_backs():
+    """reset() puts the Python-visible parameters back, not just the DSP.
+
+    The mirrors exist because softcut-lib's parameters are write-only. They were
+    seeded with reset()'s defaults at construction but never restored by reset()
+    itself, so a reset voice kept reporting its pre-reset settings -- and
+    `/softcut/reset` over OSC left every read-back stale.
+    """
+    v, _ = make_voice()
+    v.play = v.rec = True
+    v.rate = 2.0
+    v.level = 0.25
+    v.post_filter_dry = 0.0
+    v.pre_filter_fc = 400.0
+
+    v.reset()
+
+    assert v.play is False and v.rec is False
+    assert v.rate == pytest.approx(1.0)
+    assert v.post_filter_dry == pytest.approx(1.0)
+    assert v.pre_filter_fc == pytest.approx(16000.0)
+    assert v.fade_time == pytest.approx(0.01)
+    # level is an engine mix scalar, not a softcut param, and reset() is the
+    # DSP's; it is deliberately left alone.
+    assert v.level == pytest.approx(0.25)
+
+
 def test_actions_do_not_raise():
     v, _ = make_voice()
     v.play = True

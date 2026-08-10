@@ -182,6 +182,45 @@ struct Voice {
     std::atomic<float> post_filter_br_{0.0f};
     std::atomic<float> post_filter_dry_{1.0f};
 
+    // Restore the mirrors to what a freshly reset softcut::Voice holds. The
+    // declarations above say they are "seeded with softcut::Voice::reset()
+    // defaults", but until this existed only *construction* established that:
+    // after reset() the DSP was back to defaults while every Python getter still
+    // reported the pre-reset value. Any of these that stops matching its
+    // initializer above is a bug in one of the two.
+    void reset_params() {
+        rate_ = 1.0f;
+        loop_start_ = 0.0f;
+        loop_end_ = 0.0f;
+        loop_ = false;
+        rec_ = false;
+        rec_once_ = false;
+        play_ = false;
+        fade_time_ = 0.01f;
+        rec_level_ = 0.0f;
+        pre_level_ = 0.0f;
+        rec_offset_ = -8.0f / 48000.0f;
+        rec_pre_slew_time_ = 0.001f;
+        rate_slew_time_ = 0.001f;
+        phase_quant_ = 0.0f;
+        phase_offset_ = 0.0f;
+        pre_filter_fc_ = 16000.0f;
+        pre_filter_rq_ = 4.0f;
+        pre_filter_lp_ = 1.0f;
+        pre_filter_hp_ = 0.0f;
+        pre_filter_bp_ = 0.0f;
+        pre_filter_br_ = 0.0f;
+        pre_filter_dry_ = 0.0f;
+        pre_filter_fc_mod_ = 1.0f;
+        post_filter_fc_ = 12000.0f;
+        post_filter_rq_ = 4.0f;
+        post_filter_lp_ = 0.0f;
+        post_filter_hp_ = 0.0f;
+        post_filter_bp_ = 0.0f;
+        post_filter_br_ = 0.0f;
+        post_filter_dry_ = 1.0f;
+    }
+
     explicit Voice(float sr) : sample_rate(sr) {
         v.setSampleRate(sr);
     }
@@ -959,8 +998,11 @@ NB_MODULE(_core, m) {
         .def("reset", [](Voice &s) {
                 Voice *p = &s;
                 s.dsp_apply([p] { p->v.reset(); });
+                // The DSP reset happens on the audio thread when one is running;
+                // the mirrors are Python-side state, so they are restored here.
+                s.reset_params();
             },
-            "Reset the voice's DSP state to defaults.");
+            "Reset the voice's DSP state and parameter read-backs to defaults.");
 
     // Low-level realtime host. The Python-facing facade (softcut.Engine) wraps
     // this and owns the Voice objects; keep_alive ties their lifetime to the

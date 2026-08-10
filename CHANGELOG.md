@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `tests/test_numpy_interop.py`: numpy is not a dependency but is what most callers doing offline work already have, so this pins down that an ndarray works everywhere a stdlib buffer does — as a voice's buffer (written in place, not copied), as render/process input, as a caller-supplied `out`, through the buffer primitives and the WAV helpers, and as a zero-copy view over a norns buffer. Skipped when numpy is absent, which is a supported configuration rather than a degraded one.
 
+- `demos/13_osc_surface.py`: the whole stack in one run — the TouchOSC layout, OSC datagrams on a real socket, the server, the norns host and the DSP. Each step finds a control in the shipped surface by name, reads the binding the generator gave it, works out what that control sends at a given fader position, and puts it on the wire; the OSC encoder is written out rather than imported so the demo shows the actual bytes. Audio renders offline so the result is deterministic and each parameter can be checked before the next step. `--serve` instead opens the device and prints what to enter in TouchOSC's connection settings, which is the half no script can stand in for — including the reply port the phase readout needs.
+
 - `Engine.out_channels`: how many channels the mix is written to, needed to reshape what `render` returns.
 
 - `make build-no-tinyosc`: build with the native OSC transport disabled, to exercise the python-osc path locally the way CI now does.
@@ -51,6 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `scsh::apply_to_buffer` takes a separate unfaded path. With no edge crossfade the envelope is 1 throughout, which collapses the blend to the target, so the branchy per-sample envelope is lifted out of the loop and a plain clear becomes a `std::fill`. Whole-buffer clears went from ~17 ms to ~1.9 ms for `2**24` frames (numpy's memset is ~2.4 ms); reads and copies without a fade benefit equally. Both hosts get it.
 
 ### Fixed
+
+- `Voice.reset()` now restores the Python-visible parameter read-backs, not just the DSP. The mirrors that back those getters were seeded with `softcut::Voice::reset()`'s defaults at construction but never restored by `reset()` itself, so a reset voice kept reporting its pre-reset settings — and `/softcut/reset` over OSC left every read-back stale while the audio really had reset. Found by `demos/13_osc_surface.py`, whose last step presses the surface's reset button and checks the host agrees.
 
 - The native OSC receiver now closes its socket in `stop()` rather than leaving it to the destructor, so `SoftcutOSC.shutdown()` frees the listen port immediately as the python-osc backend already did. Previously the port stayed bound for an indeterminate time after shutdown, and a second server could not take it.
 

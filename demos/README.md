@@ -22,7 +22,9 @@ uv run python demos/04_stereo_layers.py --play   # also play live
 | `09_filters.py` | pre filter (record colouration) and post filter modes (lp/hp/bp/br) |
 | `10_phase_sync.py` | `sync()`, `phase_quant`/`quant_phase`, and live `position` polling |
 | `11_capture.py` | `rec_once` one-shot, reverse record, and `rec_offset` feedback delay |
+| `12_norns_api.py` | the norns-compatible layer end to end, nothing but `softcut.norns` |
+| `13_osc_surface.py` | the whole stack: TouchOSC layout -> UDP -> OSC server -> DSP, plus `--serve` for the real app |
 
-`make demos` plays every offline demo in sequence; `make demo-looper` runs the interactive `06`. Together these exercise the full softcut feature set.
+`make demos` plays every offline demo in sequence; `make demo-looper` runs the interactive `06`. `13` is the only one that does not call softcut directly: it drives the shipped TouchOSC surface over a real socket into a real OSC server, so it is what fails first if the layout, the wire protocol and the host stop agreeing. Together these exercise the full softcut feature set.
 
 `_util.py` holds the shared helpers (`load_wav_mono`, `write_wav`, `to_buffer`, `render_seconds`, `play`). Note that softcut voices are mono, so stereo sources are summed to mono on load; the engine mixes voices back to stereo via each voice's `level` and `pan`.
