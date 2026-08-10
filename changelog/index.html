@@ -1259,6 +1259,9 @@
 <p><code>tests/test_numpy_interop.py</code>: numpy is not a dependency but is what most callers doing offline work already have, so this pins down that an ndarray works everywhere a stdlib buffer does — as a voice's buffer (written in place, not copied), as render/process input, as a caller-supplied <code>out</code>, through the buffer primitives and the WAV helpers, and as a zero-copy view over a norns buffer. Skipped when numpy is absent, which is a supported configuration rather than a degraded one.</p>
 </li>
 <li>
+<p><code>demos/13_osc_surface.py</code>: the whole stack in one run — the TouchOSC layout, OSC datagrams on a real socket, the server, the norns host and the DSP. Each step finds a control in the shipped surface by name, reads the binding the generator gave it, works out what that control sends at a given fader position, and puts it on the wire; the OSC encoder is written out rather than imported so the demo shows the actual bytes. Audio renders offline so the result is deterministic and each parameter can be checked before the next step. <code>--serve</code> instead opens the device and prints what to enter in TouchOSC's connection settings, which is the half no script can stand in for — including the reply port the phase readout needs.</p>
+</li>
+<li>
 <p><code>Engine.out_channels</code>: how many channels the mix is written to, needed to reshape what <code>render</code> returns.</p>
 </li>
 <li>
@@ -1293,6 +1296,9 @@
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li>
+<p><code>Voice.reset()</code> now restores the Python-visible parameter read-backs, not just the DSP. The mirrors that back those getters were seeded with <code>softcut::Voice::reset()</code>'s defaults at construction but never restored by <code>reset()</code> itself, so a reset voice kept reporting its pre-reset settings — and <code>/softcut/reset</code> over OSC left every read-back stale while the audio really had reset. Found by <code>demos/13_osc_surface.py</code>, whose last step presses the surface's reset button and checks the host agrees.</p>
+</li>
 <li>
 <p>The native OSC receiver now closes its socket in <code>stop()</code> rather than leaving it to the destructor, so <code>SoftcutOSC.shutdown()</code> frees the listen port immediately as the python-osc backend already did. Previously the port stayed bound for an indeterminate time after shutdown, and a second server could not take it.</p>
 </li>
