@@ -156,7 +156,10 @@ def render_offline() -> np.ndarray:
     for label, setup in STEPS:
         print(f"  {label}")
         setup()
-        parts.append(softcut.render(np.zeros(int(SECTION * SR), dtype=np.float32)))
+        # render() hands back flat interleaved frames; softcut has no numpy
+        # dependency, so the 2-D view is the caller's to take (zero-copy).
+        out = softcut.render(np.zeros(int(SECTION * SR), dtype=np.float32))
+        parts.append(np.asarray(out).reshape(-1, 2))
         parts.append(gap)
     return np.concatenate(parts)
 

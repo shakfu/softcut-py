@@ -38,6 +38,17 @@ def sine_buffer(
 # --- Voice: parameters and buffers ---------------------------------------
 
 
+def rendered(eng, input) -> np.ndarray:
+    """Engine.render's flat interleaved output, as the 2-D numpy view.
+
+    `render` returns an `array.array("f")` -- the extension allocates nothing
+    and imports nothing -- so numpy callers take the shape themselves. The wrap
+    is zero-copy, so assertions below still inspect the real output.
+    """
+    out = eng.render(input)
+    return np.asarray(out).reshape(-1, eng.out_channels)
+
+
 def test_version_and_exports():
     assert {"Voice", "Engine", "next_power_of_two"} <= set(softcut.__all__)
 
@@ -126,9 +137,12 @@ def test_next_power_of_two():
 def test_process_shape_and_dtype():
     v, _ = make_voice()
     out = v.process(np.zeros(512, dtype=np.float32))
-    assert isinstance(out, np.ndarray)
-    assert out.dtype == np.float32
-    assert out.shape == (512,)
+    assert out.typecode == "f"  # a stdlib buffer; numpy is not a dependency
+    assert len(out) == 512
+
+    # ... and it writes into a buffer you supply, of either kind
+    mine = np.empty(512, dtype=np.float32)
+    assert v.process(np.zeros(512, dtype=np.float32), mine) is mine
 
 
 def test_silent_when_not_playing_or_recording():
@@ -338,7 +352,7 @@ def test_engine_allocate_requires_one_of():
 def test_render_shape_and_silence():
     eng = Engine(voices=2, sample_rate=SR, mode="playback")
     eng.allocate(seconds=1.0)
-    out = eng.render(np.zeros(800, dtype=np.float32))
+    out = rendered(eng, np.zeros(800, dtype=np.float32))
     assert out.shape == (800, 2)
     assert out.dtype == np.float32
     np.testing.assert_array_equal(out, np.zeros((800, 2), dtype=np.float32))
@@ -358,13 +372,13 @@ def test_render_playback_and_pan():
     v.play = True
     v.cut_to(0.0)
 
-    out = eng.render(np.zeros(4096, dtype=np.float32))
+    out = rendered(eng, np.zeros(4096, dtype=np.float32))
     assert np.abs(out).sum() > 0.0
     # centered: left and right are equal
     np.testing.assert_allclose(out[:, 0], out[:, 1])
 
     v.pan = -1.0
-    out = eng.render(np.zeros(4096, dtype=np.float32))
+    out = rendered(eng, np.zeros(4096, dtype=np.float32))
     assert np.abs(out[:, 0]).sum() > 0.0
     assert np.abs(out[:, 1]).sum() == 0.0  # hard left -> no right
 

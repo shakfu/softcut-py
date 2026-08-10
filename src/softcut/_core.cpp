@@ -208,31 +208,22 @@ struct Voice {
         buffer_ref = std::move(arr);
     }
 
-    // Process one mono block: float32 input -> float32 output. With `out` given,
-    // the result is written into the caller's buffer and that same object is
-    // returned, which is the path that needs no numpy; otherwise a numpy array
-    // is allocated and returned as before.
+    // Process one mono block into the caller's buffer, which is returned. The
+    // extension never allocates the result: softcut.Voice.process supplies a
+    // buffer when the caller does not, which is what keeps numpy out of the
+    // extension entirely.
     nb::object process(nb::object input, nb::object out) {
         BufferArray in = nb::cast<BufferArray>(input);
         size_t n = in.shape(0);
 
-        if (!out.is_none()) {
-            BufferArray o = nb::cast<BufferArray>(out);
-            if (o.shape(0) < n) {
-                throw std::invalid_argument(
-                    "out is too small: need " + std::to_string(n) + " samples, got " +
-                    std::to_string(o.shape(0)));
-            }
-            v.processBlockMono(in.data(), o.data(), static_cast<int>(n));
-            return out;
+        BufferArray o = nb::cast<BufferArray>(out);
+        if (o.shape(0) < n) {
+            throw std::invalid_argument(
+                "out is too small: need " + std::to_string(n) + " samples, got " +
+                std::to_string(o.shape(0)));
         }
-
-        float *out_data = new float[n == 0 ? 1 : n];
-        nb::capsule owner(out_data, [](void *p) noexcept { delete[] static_cast<float *>(p); });
-
-        v.processBlockMono(in.data(), out_data, static_cast<int>(n));
-
-        return nb::cast(nb::ndarray<nb::numpy, float, nb::ndim<1>>(out_data, {n}, owner));
+        v.processBlockMono(in.data(), o.data(), static_cast<int>(n));
+        return out;
     }
 };
 
@@ -346,34 +337,22 @@ struct Engine {
         }
     }
 
-    // Offline: mono input (n,) -> interleaved output. Returns an (n, out_channels)
-    // numpy array, or -- given `dest`, a flat buffer of n*out_channels floats --
-    // writes the interleaved frames into it and returns it, which is the path
-    // that needs no numpy. Shape is the only thing lost that way: a plain buffer
-    // carries no second dimension.
+    // Offline: mono input (n,) -> interleaved output written into `dest`, a flat
+    // buffer of n*out_channels floats, which is returned. As with process(), the
+    // extension never allocates the result.
     nb::object render(nb::object input, nb::object dest) {
         BufferArray in = nb::cast<BufferArray>(input);
         size_t n = in.shape(0);
         const float *inp = in.data();
         const size_t needed = n * static_cast<size_t>(out_channels);
 
-        float *out = nullptr;
-        nb::object owner_obj;
-        nb::capsule owner;
-        if (!dest.is_none()) {
-            BufferArray d = nb::cast<BufferArray>(dest);
-            if (d.shape(0) < needed) {
-                throw std::invalid_argument(
-                    "out is too small: need " + std::to_string(needed) +
-                    " samples (n * out_channels), got " + std::to_string(d.shape(0)));
-            }
-            out = d.data();
-        } else {
-            out = new float[needed == 0 ? 1 : needed];
-            owner = nb::capsule(out, [](void *p) noexcept {
-                delete[] static_cast<float *>(p);
-            });
+        BufferArray d = nb::cast<BufferArray>(dest);
+        if (d.shape(0) < needed) {
+            throw std::invalid_argument(
+                "out is too small: need " + std::to_string(needed) +
+                " samples (n * out_channels), got " + std::to_string(d.shape(0)));
         }
+        float *out = d.data();
 
         size_t done = 0;
         while (done < n) {
@@ -381,9 +360,7 @@ struct Engine {
             process_core(inp + done, out + done * out_channels, chunk);
             done += static_cast<size_t>(chunk);
         }
-        if (!dest.is_none()) return dest;
-        return nb::cast(nb::ndarray<nb::numpy, float, nb::ndim<2>>(
-            out, {n, static_cast<size_t>(out_channels)}, owner));
+        return dest;
     }
 
     void start() {
@@ -955,10 +932,10 @@ NB_MODULE(_core, m) {
             "Quantized phase (in units of phase_quant).")
 
         // actions
-        .def("process", &Voice::process, "input"_a, "out"_a = nb::none(),
-            "Process one mono block. Takes any 1-D C-contiguous float32 buffer of "
-            "input samples. With `out` given, writes there and returns it; "
-            "otherwise allocates and returns a numpy array of the same length.")
+        .def("process", &Voice::process, "input"_a, "out"_a,
+            "Process one mono block of any 1-D C-contiguous float32 buffer into "
+            "`out`, which is returned. Use softcut.Voice.process, which supplies "
+            "`out` when you do not.")
         .def("cut_to", [](Voice &s, float sec) {
                 Voice *p = &s;
                 s.dsp_apply([p, sec] { p->v.cutToPos(sec); });
@@ -989,11 +966,11 @@ NB_MODULE(_core, m) {
             "Open (if needed) and start the audio device. Non-blocking.")
         .def("stop", &Engine::stop, nb::call_guard<nb::gil_scoped_release>(),
             "Stop the audio device.")
-        .def("render", &Engine::render, "input"_a, "out"_a = nb::none(),
-            "Offline: process a 1-D float32 mono input buffer through all voices. "
-            "Returns an (n, out_channels) numpy array, or -- with `out`, a flat "
-            "buffer of n*out_channels floats -- writes interleaved frames there "
-            "and returns it. Do not call while the device is running.")
+        .def("render", &Engine::render, "input"_a, "out"_a,
+            "Offline: process a 1-D float32 mono input buffer through all voices, "
+            "writing interleaved frames into `out` (a flat buffer of "
+            "n*out_channels floats), which is returned. Do not call while the "
+            "device is running.")
         .def("set_feedback", &Engine::set_feedback, "src"_a, "dst"_a, "amount"_a,
             "Set the feedback gain from voice src's output into voice dst's input.")
         .def("get_feedback", &Engine::get_feedback, "src"_a, "dst"_a,

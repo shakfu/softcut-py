@@ -38,7 +38,7 @@ Two transports share one dispatch table, selected by `backend=`:
 | backend | requires | notes |
 |---|---|---|
 | `"auto"` (default) | — | native if built, else python-osc |
-| `"python-osc"` | `pip install softcut-py[osc]` | pure-Python; core stays numpy-only |
+| `"python-osc"` | `pip install softcut-py[osc]` | pure-Python; the core needs no dependencies |
 | `"native"` (experimental) | source build with `SOFTCUT_ENABLE_TINYOSC` | dependency-free UDP + vendored tinyosc |
 
 !!! warning "The native transport is experimental" It is **not** compiled into the published wheels and must be enabled in a source build. It is IPv4-only and far less battle-tested than python-osc. Prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.

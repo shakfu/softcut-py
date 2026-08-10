@@ -65,7 +65,8 @@ def test_offline_render_through_engine():
     v.play = True
     v.cut_to(0.0)
 
-    out = eng.render(np.zeros(sr // 2, dtype=np.float32))  # render 0.5s
+    out = np.asarray(eng.render(np.zeros(sr // 2, dtype=np.float32)))  # render 0.5s
+    out = out.reshape(-1, eng.out_channels)
     assert out.shape == (sr // 2, 2)
     assert out.dtype == np.float32
     assert np.isfinite(out).all()

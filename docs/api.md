@@ -18,7 +18,7 @@ A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are 
 | Attribute | Description |
 | --- | --- |
 | `sample_rate` | Sample rate in Hz. |
-| `buffer` | The voice's audio buffer, a 1-D `float32` numpy array you own. The length must be a positive power of two (else `ValueError`). The voice reads from and records into this memory in place; the same array may be shared by several voices. |
+| `buffer` | The voice's audio buffer, a 1-D C-contiguous `float32` buffer you own (`array.array`, `memoryview` or ndarray). The length must be a positive power of two (else `ValueError`). The voice reads from and records into this memory in place; the same array may be shared by several voices. |
 
 ### Transport and loop
 

@@ -57,7 +57,10 @@ def render_seconds(
         input = np.asarray(input, dtype=np.float32)[:n]
         if len(input) < n:
             input = np.concatenate([input, np.zeros(n - len(input), dtype=np.float32)])
-    return engine.render(input)
+    # render() hands back a flat interleaved buffer; the demos are numpy code,
+    # so this is the one place the 2-D view is taken (without copying).
+    out = engine.render(input)
+    return np.asarray(out).reshape(-1, engine.out_channels)
 
 
 def play(engine: softcut.Engine, seconds: float) -> None:

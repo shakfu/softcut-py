@@ -36,20 +36,31 @@ from typing import Any
 from softcut._core import Voice, _Engine
 from softcut._core import list_devices as _list_devices
 
-#: numpy is optional. Buffers are plain `array.array("f")`, which numpy wraps
-#: without copying, and every entry point takes any C-contiguous float32 buffer.
-#: It is needed only to *allocate the return value* of `render`/`process` when
-#: no `out` buffer is supplied -- pass one and softcut never imports it.
-_np: Any | None
-try:
-    import numpy as _np
-except ImportError:  # pragma: no cover - exercised only without numpy
-    _np = None
-
 
 def _zeros(n: int) -> array.array:
-    """A zeroed float32 buffer of ``n`` samples, with no numpy involved."""
+    """A zeroed float32 buffer of ``n`` samples."""
     return array.array("f", bytes(4 * int(n)))
+
+
+def _samples(buffer: Any) -> int:
+    """How many float32 samples a buffer holds, refusing anything else.
+
+    The extension takes 1-D C-contiguous float32 only. Checking here rather than
+    letting the binding fail means the message names the actual problem -- most
+    often a float64 array, which used to be coerced silently and now is not.
+    """
+    view = memoryview(buffer)
+    if view.ndim != 1 or view.format not in ("f", "<f"):
+        raise ValueError(
+            "expected a 1-D C-contiguous float32 buffer, got "
+            f"ndim={view.ndim} format={view.format!r}"
+            + (
+                " (a float64 array? cast it with .astype('float32'))"
+                if view.format in ("d", "<d")
+                else ""
+            )
+        )
+    return int(view.nbytes // view.itemsize)
 
 
 __all__ = ["Voice", "Engine", "Softcut", "next_power_of_two", "list_devices"]
@@ -148,8 +159,26 @@ def _voice_repr(self: Voice) -> str:
     )
 
 
+_voice_process_native = Voice.process
+
+
+def _voice_process(self: Voice, input: Any, out: Any = None) -> Any:
+    """Process one mono block, returning the output buffer.
+
+    ``input`` is any 1-D C-contiguous float32 buffer. The result is written into
+    ``out`` and returned; omit it and a zeroed ``array.array("f")`` of the same
+    length is allocated. The extension itself never allocates, which is what
+    keeps numpy out of it.
+    """
+    n = _samples(input)
+    if out is None:
+        out = _zeros(n)
+    return _voice_process_native(self, input, out)
+
+
 # Attached via setattr so the type checker uses the declarations in _core.pyi
 # rather than flagging assignment to the compiled class.
+setattr(Voice, "process", _voice_process)
 setattr(Voice, "configure", _voice_configure)
 setattr(
     Voice,
@@ -251,6 +280,11 @@ class Engine(Sequence[Voice]):
         """True while the audio device is started."""
         return self._core.running
 
+    @property
+    def out_channels(self) -> int:
+        """How many channels the mix is written to (2 unless configured otherwise)."""
+        return self._core.out_channels
+
     def allocate(
         self,
         seconds: float | None = None,
@@ -307,32 +341,22 @@ class Engine(Sequence[Voice]):
         """Offline: process a mono input block through all voices.
 
         ``input`` is any 1-D C-contiguous float32 buffer of mono samples -- an
-        ``array.array``, a ``memoryview``, or a numpy array. Returns an
-        ``(n, out_channels)`` float32 numpy array of the mixed output; pass
-        ``out``, a flat buffer of ``n * out_channels`` floats, to write the
-        interleaved frames there instead and skip numpy entirely. Raises if the
-        device is running (use the live path then, not render).
+        ``array.array``, a ``memoryview``, or a numpy array. The mixed output is
+        written into ``out`` and returned; omit it and a zeroed
+        ``array.array("f")`` of ``n * out_channels`` samples is allocated for
+        you. Frames are interleaved, so ``numpy.asarray(out).reshape(-1,
+        engine.out_channels)`` is the 2-D view, taken without copying.
+
+        Raises if the device is running (use the live path then, not render).
         """
         if self.running:
             raise RuntimeError(
                 "cannot render() while the device is running; stop() first"
             )
-        if _np is None and out is None:
-            raise RuntimeError(
-                "render() allocates its result as a numpy array, and numpy is not "
-                "installed. Either pass out= (a flat buffer of n * out_channels "
-                "float32 samples, which is written in place) or install numpy: "
-                "pip install softcut-py[numpy]"
-            )
-        arr = input
-        if _np is not None:
-            # Only a courtesy: float64 or a strided view becomes what the binding
-            # takes. Without numpy the buffer has to arrive in the right form,
-            # and the binding says so if it does not.
-            arr = _np.ascontiguousarray(input, dtype=_np.float32)
-            if arr.ndim != 1:
-                raise ValueError("render input must be a 1-D mono array")
-        return self._core.render(arr, out)
+        n = _samples(input)
+        if out is None:
+            out = _zeros(n * self.out_channels)
+        return self._core.render(input, out)
 
     def start(self) -> Engine:
         """Open (if needed) and start the audio device. Non-blocking."""

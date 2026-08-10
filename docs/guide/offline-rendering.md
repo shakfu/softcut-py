@@ -1,6 +1,8 @@
 # Offline rendering
 
-`Engine.render()` processes audio without a device: it takes a mono numpy block, runs it through all voices, and returns the mixed stereo output. It is synchronous and deterministic — ideal for batch processing and tests.
+`Engine.render()` processes audio without a device: it takes a mono block, runs it through all voices, and returns the mixed stereo output. It is synchronous and deterministic — ideal for batch processing and tests.
+
+Output frames are interleaved in a flat `array.array("f")` of `n * out_channels` samples; `numpy.asarray(out).reshape(-1, eng.out_channels)` is the 2-D view, taken without copying. Pass your own buffer as `out=` to fill it in place and skip the allocation — useful in a loop, and it may be an ndarray.
 
 ```python
 import numpy as np, softcut
@@ -43,7 +45,7 @@ mono_out = v.process(np.zeros(1024, dtype=np.float32))   # shape (1024,)
 
 ## Audio files
 
-Buffers are numpy arrays, so use any library to read and write audio. The demos use only the standard library `wave` module; `soundfile` is a richer option:
+Buffers are plain float32 buffers, so use any library to read and write audio. The demos use only the standard library `wave` module; `soundfile` is a richer option:
 
 ```python
 import soundfile as sf

@@ -48,22 +48,32 @@ v.configure(loop_region=(0, 1), rate=1.0)
 v.rec = v.play = True
 v.cut_to(0)
 
-out = eng.render(np.random.randn(48000).astype(np.float32))   # (48000, 2) float32
+out = eng.render(np.random.randn(48000).astype(np.float32))   # flat, interleaved
+frames = np.asarray(out).reshape(-1, eng.out_channels)        # (48000, 2), no copy
+```
+
+`render` returns interleaved frames in an `array.array("f")`; wrapping it in numpy costs nothing. Pass your own buffer as `out` — of either kind — to fill it in place and skip the allocation:
+
+```python
+mono = np.random.randn(48000).astype(np.float32)
+buf = np.empty(48000 * eng.out_channels, dtype=np.float32)
+eng.render(mono, buf)          # fills and returns buf
 ```
 
 Load/save audio with whatever you like (e.g. `soundfile`) and assign the array to `voice.buffer`.
 
 ## Dependencies
 
-The package has **no required runtime dependencies**. Buffers are `array.array("f")` and every entry point takes any C-contiguous float32 buffer, so numpy arrays work everywhere they did before — they are simply no longer necessary. The sample-level buffer arithmetic and the WAV sample-format conversion run in C++ (shared with the standalone server), and `wave` from the standard library parses the container.
+softcut-py has **no dependencies**, numpy included. Buffers are `array.array("f")` and every entry point takes any C-contiguous float32 buffer, so numpy arrays work wherever you care to use them — as a voice's buffer, as render input, as an `out` buffer — and `numpy.asarray` wraps what softcut returns without copying. The extension allocates no results and imports nothing.
 
-numpy is needed for exactly one thing: `Engine.render` and `Voice.process` allocate their result as an `(n, out_channels)` ndarray. Pass `out=` — a flat buffer of `n * out_channels` float32 samples, written in place and returned — and nothing imports numpy at all.
+The sample-level buffer arithmetic and the WAV sample-format conversion run in C++ (shared with the standalone server), and `wave` from the standard library parses the container.
 
 ```console
-$ pip install softcut-py            # no dependencies
-$ pip install softcut-py[numpy]     # + the ndarray return from render/process
-$ pip install softcut-py[osc]       # + the pure-Python OSC transport
+$ pip install softcut-py         # no dependencies
+$ pip install softcut-py[osc]    # + the pure-Python OSC transport
 ```
+
+One consequence worth knowing: a float64 array is now **refused** rather than silently converted. Cast it with `.astype("float32")`.
 
 ## Routing and devices
 

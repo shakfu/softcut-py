@@ -1,6 +1,6 @@
 # Demos
 
-The [`demos/`](https://github.com/shakfu/softcut-py/tree/main/demos) directory has small, self-contained examples driving softcut with the audio files in `tests/data/`. Audio I/O uses only the standard library (`wave`) plus numpy.
+The [`demos/`](https://github.com/shakfu/softcut-py/tree/main/demos) directory has small, self-contained examples driving softcut with the audio files in `tests/data/`. The demos are written in numpy; audio I/O goes through the library's own WAV helpers (the standard library's `wave` module plus the C sample conversion).
 
 The offline demos render to WAV files under `build/out/` so you can listen to the results; most also accept `--play` to play live to the speakers instead.
 

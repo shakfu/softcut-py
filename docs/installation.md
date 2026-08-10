@@ -8,7 +8,17 @@ pip install softcut-py
 
 (The distribution is `softcut-py`; the import name is `softcut`.)
 
-Wheels are published for CPython 3.10–3.14 on Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows. numpy is installed automatically as a dependency.
+Wheels are published for CPython 3.10–3.14 on Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows.
+
+There are **no dependencies**, numpy included. One optional extra is available:
+
+```bash
+pip install softcut-py[osc]     # the pure-Python OSC transport (python-osc)
+```
+
+Buffers are `array.array("f")` and every entry point takes any C-contiguous
+float32 buffer, so numpy arrays work wherever you care to use them, and
+`numpy.asarray` wraps what softcut returns without copying.
 
 ## From source
 
@@ -35,7 +45,7 @@ Set `SOFTCUT_TEST_AUDIO=1` to additionally exercise a real audio device in the t
 
 ## Optional: audio file I/O
 
-softcut buffers are plain numpy arrays, so loading and saving audio is up to you. The standard library `wave` module works for PCM WAV (used by the demos); [`soundfile`](https://python-soundfile.readthedocs.io/) adds FLAC/OGG and more:
+softcut buffers are plain float32 buffers, so loading and saving audio is up to you. The standard library `wave` module works for PCM WAV (used by the demos); [`soundfile`](https://python-soundfile.readthedocs.io/) adds FLAC/OGG and more:
 
 ```bash
 pip install soundfile

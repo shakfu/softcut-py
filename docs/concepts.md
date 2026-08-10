@@ -15,10 +15,13 @@ A voice is mono. Stereo output comes from the engine mixing several voices via t
 
 ## Buffers
 
-softcut-lib **owns no buffer memory** — a voice's buffer is a numpy `float32` array that *you* own and assign:
+softcut-lib **owns no buffer memory** — a voice's buffer is a `float32` buffer that *you* own and assign. Anything C-contiguous will do, so the standard library is enough and numpy is welcome:
 
 ```python
-import numpy as np
+import array
+v.buffer = array.array("f", bytes(4 * 2**16))
+
+import numpy as np                              # equally fine
 v.buffer = np.zeros(2**16, dtype=np.float32)
 ```
 
@@ -62,6 +65,6 @@ It runs in two ways:
 
 - **Live** (`start()`/`stop()` or `with`) — audio runs on a background thread; `start()` returns immediately and the REPL stays responsive. See [Live looping](guide/live-looping.md).
 
-- **Offline** (`render()`) — process a numpy block synchronously and get the mixed stereo output back. Deterministic; used by the tests. See [Offline rendering](guide/offline-rendering.md).
+- **Offline** (`render()`) — process a mono block synchronously and get the mixed stereo output back. Deterministic; used by the tests. See [Offline rendering](guide/offline-rendering.md).
 
 `mode` is `"duplex"` (live mic input feeds recording voices) or `"playback"` (speakers only). Voices can also feed each other — see [Routing & feedback](guide/routing.md).
