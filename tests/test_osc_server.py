@@ -9,6 +9,9 @@ UDP is lossy, so the control-path tests resend their (idempotent) messages via
 the datagram arrived. This keeps them deterministic under full-suite load.
 """
 
+import socket
+import subprocess
+import sys
 import threading
 import time
 
@@ -76,6 +79,48 @@ def server(backend):
 def client(server):
     _host, port = server.server_address
     return pythonosc_client.SimpleUDPClient("127.0.0.1", port)
+
+
+def test_the_transport_being_built_in_does_not_start_a_server():
+    """Shipping the OSC transport must not ship a listening socket.
+
+    tinyosc is compiled into the default build, so importing softcut carries the
+    *ability* to serve OSC. It must not carry a server: nothing binds and no
+    thread starts until `SoftcutOSC` is constructed (API) or `python -m
+    softcut.osc` is run (command line).
+    """
+    code = (
+        "import threading, softcut, softcut.osc, softcut.norns\n"
+        "print(threading.active_count())"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "1", "importing softcut started a background thread"
+
+
+def test_the_socket_opens_on_construction_and_closes_on_shutdown(backend):
+    """The explicit step is construction; the port is free again after shutdown."""
+    host = NornsSoftcut(sample_rate=SR, buffer_frames=2**16, mode="playback")
+    srv = SoftcutOSC(
+        host,
+        backend=backend,
+        listen_host="127.0.0.1",
+        listen_port=0,
+        reply_host="127.0.0.1",
+        reply_port=0,
+    )
+    _bound_host, port = srv.server_address
+    assert port != 0  # constructing bound a real port
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    with pytest.raises(OSError):  # still held by the server
+        probe.bind(("127.0.0.1", port))
+
+    srv.shutdown()
+    probe.bind(("127.0.0.1", port))  # released
+    probe.close()
 
 
 def test_set_param_rate_and_voice_offset(server, client):

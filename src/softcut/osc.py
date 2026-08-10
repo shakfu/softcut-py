@@ -9,19 +9,22 @@ buffers 0-1) while the norns host is 1-based, so indices gain ``+1`` here.
 
 Two transports are available and share one dispatch table:
 
+- ``native``: a dependency-free UDP transport on the vendored tinyosc codec,
+  compiled in by default (reported by :data:`softcut._core.HAVE_TINYOSC`; turn it
+  off with ``SOFTCUT_ENABLE_TINYOSC=OFF``). Per-voice ``/set/param/cut/*``
+  messages are parsed and dispatched in C without the GIL. IPv4-only.
 - ``python-osc`` (the ``osc`` extra: ``pip install softcut-py[osc]``): the
-  default pure-Python transport; the core package stays numpy-only.
-- ``native`` (**experimental**): a dependency-free UDP transport built on the
-  vendored tinyosc codec, compiled in with the CMake option
-  ``SOFTCUT_ENABLE_TINYOSC`` (reported by :data:`softcut._core.HAVE_TINYOSC`). It
-  is not built into the published wheels -- opt in with a source build.
-  Receiving and parsing happen in C, but dispatch runs under the GIL because the
-  DSP command queue is single-producer; it is a dependency-free transport, not a
-  GIL-free fast path. IPv4-only and less battle-tested than python-osc.
+  pure-Python transport, longer-established and the fallback when the native one
+  is not built.
 
-``backend="auto"`` prefers native when built, else python-osc. Defaults match
-the reference: listen on UDP 9999, reply (phase poll) to 127.0.0.1:57120. Run as
-a server with ``python -m softcut.osc``.
+``backend="auto"`` prefers native when built, else python-osc, so a bare
+``pip install softcut-py`` can serve OSC with nothing else installed.
+
+**Nothing here runs on its own.** Importing this module opens no socket and
+starts no thread: a server exists once :class:`SoftcutOSC` is constructed, and
+listens once it is started -- explicitly, from your code or from
+``python -m softcut.osc``. Defaults match the reference: listen on UDP 9999,
+reply (phase poll) to 127.0.0.1:57120.
 """
 
 from __future__ import annotations

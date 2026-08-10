@@ -38,18 +38,24 @@ Two transports share one dispatch table, selected by `backend=`:
 | backend | requires | notes |
 |---|---|---|
 | `"auto"` (default) | — | native if built, else python-osc |
-| `"python-osc"` | `pip install softcut-py[osc]` | pure-Python; the core needs no dependencies |
-| `"native"` (experimental) | source build with `SOFTCUT_ENABLE_TINYOSC` | dependency-free UDP + vendored tinyosc |
+| `"native"` | nothing — built in by default | dependency-free UDP + vendored tinyosc; IPv4-only |
+| `"python-osc"` | `pip install softcut-py[osc]` | pure-Python; longer-established |
 
-!!! warning "The native transport is experimental" It is **not** compiled into the published wheels and must be enabled in a source build. It is IPv4-only and far less battle-tested than python-osc. Prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.
-
-The native transport is compiled in with the CMake option (source build only):
+tinyosc is compiled into the extension by default, including in the published
+wheels, so `pip install softcut-py` serves OSC with nothing else installed and
+`auto` resolves to `native`. That also means the transport is exercised by
+ordinary use rather than by a CI leg alone. Turn it off with:
 
 ```bash
-SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" pip install .
+SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=OFF" pip install .
 # or, in this repo:
-make build-tinyosc
+make build-no-tinyosc
 ```
+
+!!! note "The server is never implicit" Importing `softcut.osc` opens no socket
+    and starts no thread. A server exists when you construct `SoftcutOSC` and
+    listens when you start it, or when you run `python -m softcut.osc`. Building
+    the transport in grants the *ability* to serve, never a running server.
 
 Whether it was built is reported by `softcut._core.HAVE_TINYOSC` (and `softcut.osc.NATIVE_OSC_AVAILABLE`). Per-voice `/set/param/cut/*` messages are parsed **and dispatched entirely in C, without the GIL** — via a second single-producer command queue drained on the audio thread plus atomic parameter mirrors — and the phase poll runs in C too, so a busy Python interpreter can neither delay nor be delayed by the native control path. Other addresses (buffer ops, lifecycle) fall back to a Python handler.
 

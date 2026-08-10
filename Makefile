@@ -4,7 +4,10 @@
 # This Makefile wraps common build commands for convenience.
 # The actual build is handled by scikit-build-core via pyproject.toml
 
-.PHONY: all sync build rebuild build-tinyosc build-bench build-standalone test-standalone touchosc test lint format typecheck qa demos demo-looper clean        distclean wheel sdist dist check publish-test publish upgrade         coverage coverage-html docs docs-serve docs-deploy release help
+.PHONY: all sync build rebuild build-tinyosc build-no-tinyosc build-bench \
+		build-standalone test-standalone touchosc test lint format typecheck \
+		qa demos demo-looper clean distclean wheel sdist dist check publish-test \
+		publish upgrade coverage coverage-html docs docs-serve docs-deploy help
 
 # Default target
 all: build
@@ -20,9 +23,14 @@ build:
 # Alias for build
 rebuild: build
 
-# Build with the optional native OSC codec (vendored tinyosc) compiled in.
+# Build with the native OSC codec (vendored tinyosc) compiled in. This is the
+# default; the target stays for an explicit, cache-busting rebuild.
 build-tinyosc:
 	@SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" uv sync --reinstall-package softcut-py --no-cache
+
+# Build *without* tinyosc, to exercise the pure-Python (python-osc) path.
+build-no-tinyosc:
+	@SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=OFF" uv sync --reinstall-package softcut-py --no-cache
 
 # Build for benchmarks/osc_jitter.py: native OSC transport plus the compile-time
 # apply-latency probe (both off in normal builds).
@@ -125,11 +133,6 @@ docs-serve:
 docs-deploy:
 	@uv run --group docs mkdocs gh-deploy --force
 
-# Create a release (bump version, tag, push)
-release:
-	@echo "Current version: $$(grep '^version' pyproject.toml | head -1)"
-	@read -p "New version: " version; 	sed -i '' "s/^version = .*/version = \"$$version\"/" pyproject.toml; 	git add pyproject.toml; 	git commit -m "Bump version to $$version"; 	git tag -a "v$$version" -m "Release $$version"; 	echo "Tagged v$$version. Run 'git push && git push --tags' to publish."
-
 # Clean build artifacts. The compiled extension lives in the uv-managed venv
 # (rebuilt by `make build`), so cleanup must prune .venv and .git: a bare
 # `find . -name "*.so" -delete` would wipe every dependency's .so (numpy, etc.)
@@ -174,7 +177,6 @@ help:
 	@echo "  docs         - Build the documentation site (MkDocs) into site/"
 	@echo "  docs-serve   - Serve the docs locally with live reload"
 	@echo "  docs-deploy  - Build and publish the docs to GitHub Pages (gh-pages)"
-	@echo "  release      - Bump version, tag, and prepare release"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  distclean    - Remove all generated files"
 	@echo "  help         - Show this help message"

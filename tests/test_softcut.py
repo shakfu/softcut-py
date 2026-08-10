@@ -1,6 +1,8 @@
 """Tests for the softcut nanobind extension, Engine host, and Python sugar."""
 
 import os
+import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -51,6 +53,22 @@ def rendered(eng, input) -> np.ndarray:
 
 def test_version_and_exports():
     assert {"Voice", "Engine", "next_power_of_two"} <= set(softcut.__all__)
+
+
+def test_version_matches_the_packaging_metadata():
+    """`softcut.__version__` and pyproject's version are two hand-kept copies.
+
+    They are edited together by `make release`; this catches the case where one
+    moves without the other, which is silent otherwise -- an installed package
+    reporting a version it was not built as.
+    """
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if not pyproject.exists():  # pragma: no cover - installed-only test runs
+        pytest.skip("pyproject.toml not present (testing an installed package)")
+
+    declared = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.M)
+    assert declared is not None, "no version in pyproject.toml"
+    assert softcut.__version__ == declared.group(1)
 
 
 def test_param_roundtrip():

@@ -64,7 +64,7 @@ def _samples(buffer: Any) -> int:
 
 
 __all__ = ["Voice", "Engine", "Softcut", "next_power_of_two", "list_devices"]
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 def list_devices() -> list[dict]:

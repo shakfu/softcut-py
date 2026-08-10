@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/shakfu/softcut-py/actions/workflows/ci.yml/badge.svg)
 
-Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via [miniaudio](https://github.com/mackron/miniaudio). Built with [nanobind](https://github.com/wjakob/nanobind).
+Python bindings for [softcut-lib](https://github.com/monome/softcut-lib) — the per-voice DSP engine behind monome norns' softcut — with realtime audio I/O via [miniaudio](https://github.com/mackron/miniaudio). Built with [nanobind](https://github.com/wjakob/nanobind), and with **no dependencies**: buffers are plain `array.array("f")`, and audio, WAV I/O and the OSC server all work on a bare install.
 
 The primary API exposes softcut as idiomatic Python objects. An optional [norns-compatible layer](#norns-compatible-api) (`softcut.norns`) additionally mirrors the flat norns Lua `softcut` API for porting existing scripts.
 
@@ -154,15 +154,17 @@ The full namespace is mirrored: all `/set/param/cut/*` params, routing (`/set/le
 
 **Two transports**, selected by `backend=` ("auto" by default):
 
-- **python-osc** — the default pure-Python transport. Install the optional extra: `pip install softcut-py[osc]`.
+- **native** — a dependency-free UDP transport on the vendored [tinyosc](https://github.com/mhroth/tinyosc) codec, **compiled in by default**, so `pip install softcut-py` serves OSC with nothing else installed. Per-voice `/set/param/cut/*` messages are parsed and dispatched entirely in C without the GIL. IPv4-only. Disable with a source build (`SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=OFF" pip install .`).
 
-- **native** (**experimental**) — a dependency-free UDP transport built on the vendored [tinyosc](https://github.com/mhroth/tinyosc) codec. It is **not** compiled into the published wheels; opt in with a source build (`SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" pip install .` or `make build-tinyosc`; reported by `softcut._core.HAVE_TINYOSC`). Per-voice `/set/param/cut/*` messages are parsed **and dispatched entirely in C without the GIL** — via a second single-producer command queue drained on the audio thread plus atomic parameter mirrors — and the phase poll runs in C too, so a busy Python interpreter can neither delay nor be delayed by the native control path (other addresses fall back to a Python handler). It is IPv4-only and less battle-tested than python-osc; prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.
+- **python-osc** — the pure-Python transport, longer-established and the fallback when the native one is not built. `pip install softcut-py[osc]`.
 
-A few addresses are partial, mirroring the norns layer's gaps: `enabled` maps to play, `in_cut` uses the scalar per-voice input gain (there is no per-channel ADC matrix), and level/pan slew and the VU poll are accepted-and-ignored. See [`docs/guide/osc.md`](docs/guide/osc.md) for the complete address table.
+`"auto"` takes native when built and python-osc otherwise; either can be named explicitly.
+
+Building the transport in grants the *ability* to serve OSC, never a running server: importing `softcut.osc` opens no socket and starts no thread. A server exists when you construct `SoftcutOSC` and listens when you start it, or when you run `python -m softcut.osc`.
 
 ### Standalone server (no Python)
 
-For a headless, interpreter-free deployment, [`clients/softcut-osc`](clients/softcut-osc/) builds a standalone native binary (softcut-lib + tinyosc + miniaudio) that speaks the same softcut OSC protocol with **no CPython at all** — so nothing on its control path can touch a GIL. It is the pure-C++ counterpart to `softcut.osc`: identical DSP and wire protocol, no library or numpy. It covers the full namespace plus WAV disk I/O (via the vendored [dr_wav](https://github.com/mackron/dr_libs), on a disk-worker thread with click-avoidance crossfades), `preserve`/`mix` blending, opt-in `--resample-on-read`, and device selection.
+For a headless, interpreter-free deployment, [`clients/softcut-osc`](clients/softcut-osc/) builds a standalone native binary (softcut-lib + tinyosc + miniaudio) that speaks the same softcut OSC protocol with **no CPython at all** — so nothing on its control path can touch a GIL. It is the pure-C++ counterpart to `softcut.osc`: identical DSP and wire protocol, with no interpreter to schedule at all — where `softcut.osc` merely keeps its control path off the GIL, this has no GIL to keep off. It covers the full namespace plus WAV disk I/O (via the vendored [dr_wav](https://github.com/mackron/dr_libs), on a disk-worker thread with click-avoidance crossfades), `preserve`/`mix` blending, opt-in `--resample-on-read`, and device selection.
 
 ```bash
 make build-standalone                    # -> build/softcut-osc/softcut-osc
@@ -188,7 +190,7 @@ Set `SOFTCUT_TEST_AUDIO=1` to additionally exercise a real audio device in the t
 
 ## Releasing
 
-CI runs QA and a Linux/macOS/Windows build smoke on every push and pull request. Pushing a `v*` tag builds wheels for CPython 3.10-3.14 across Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows with [cibuildwheel](https://cibuildwheel.pypa.io), plus the sdist, and publishes them to PyPI via trusted publishing. `make release` bumps the version and creates the tag; pushing it triggers the release. (TestPyPI is available via the workflow's manual `workflow_dispatch`.)
+CI runs QA and a Linux/macOS/Windows build smoke on every push and pull request. Pushing a `v*` tag builds wheels for CPython 3.10-3.14 across Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows with [cibuildwheel](https://cibuildwheel.pypa.io), plus the sdist, and publishes them to PyPI via trusted publishing. To cut one, set the version in **both** `pyproject.toml` and `src/softcut/__init__.py` — they are separate copies, and `test_version_matches_the_packaging_metadata` fails if they disagree — then commit, tag `vX.Y.Z`, and push the tag. (TestPyPI is available via the workflow's manual `workflow_dispatch`.)
 
 ## Notes
 

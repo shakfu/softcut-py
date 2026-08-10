@@ -574,6 +574,16 @@ public:
             nb::gil_scoped_release rel;
             thread_.join();
         }
+        // Close the socket here rather than leaving it to the destructor, so
+        // stopping a server frees its port immediately -- as the python-osc
+        // backend's server_close() does. Waiting for the object to be collected
+        // would leave the port held for an indeterminate time, and the two
+        // backends must behave the same. stop() is terminal: the receiver is not
+        // restartable afterwards, matching the other backend.
+        if (sock_ != kInvalidSocket) {
+            close_socket(sock_);
+            sock_ = kInvalidSocket;
+        }
     }
 
 private:

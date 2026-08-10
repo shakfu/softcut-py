@@ -8,13 +8,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(nanobind CONFIG REQUIRED)
 
-# Optional (EXPERIMENTAL) native OSC transport: compile the vendored tinyosc C
-# wire codec into the extension for a dependency-free OSC server. OFF by default
-# and not enabled in the published wheels; the pure-Python option (python-osc)
-# is the default. Enable in a source build with:
-#   SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=ON" (see `make build-tinyosc`).
+# Native OSC transport: compile the vendored tinyosc C wire codec into the
+# extension, giving a dependency-free OSC server. ON by default, including in the
+# published wheels, so `pip install softcut-py` can serve OSC with nothing else
+# installed and the transport is exercised by ordinary use rather than only by a
+# CI leg. Turn it off with:
+#   SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=OFF" (see `make build-no-tinyosc`),
+# which falls back to the pure-Python transport (the `osc` extra, python-osc).
 option(SOFTCUT_ENABLE_TINYOSC
-    "Compile the experimental vendored tinyosc native OSC transport into _core" OFF)
+    "Compile the vendored tinyosc native OSC transport into _core" ON)
 
 # Optional benchmark-only apply-latency probe (benchmarks/osc_jitter.py). It
 # stamps a timestamp at each parameter apply so the benchmark can isolate OSC

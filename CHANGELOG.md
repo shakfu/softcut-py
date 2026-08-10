@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0]
+
 ### Added
 
 - `clients/touchosc`: a TouchOSC control surface (`softcut.tosc`) covering the OSC namespace across eight pages — a mixer strip per voice, tabular loop/record/pre-filter/post-filter tables, the cut-to-cut feedback and voice-sync matrices, buffer and disk operations, and a receive-only phase readout driven by the phase poll. Every control sends a real address, with the voice index as a constant integer argument and the control's value scaled into the parameter's range; indices are 0-based on the wire and 1-based in the captions, as the protocol and norns respectively have them. Persistent state gets a fader or a latching toggle, one-shot commands (voice sync, buffer assignment, reset, disk I/O) get a momentary button, and the sync diagonal is a blank because syncing a voice to itself does nothing.
@@ -24,9 +26,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `tests/test_numpy_interop.py`: numpy is not a dependency but is what most callers doing offline work already have, so this pins down that an ndarray works everywhere a stdlib buffer does — as a voice's buffer (written in place, not copied), as render/process input, as a caller-supplied `out`, through the buffer primitives and the WAV helpers, and as a zero-copy view over a norns buffer. Skipped when numpy is absent, which is a supported configuration rather than a degraded one.
 
+- `Engine.out_channels`: how many channels the mix is written to, needed to reshape what `render` returns.
+
+- `make build-no-tinyosc`: build with the native OSC transport disabled, to exercise the python-osc path locally the way CI now does.
+
 - `softcut.osc._PhasePoll.errors`: how many scans have failed since the poll was last started.
 
 ### Changed
+
+- **The native OSC transport (vendored tinyosc) is compiled in by default**, published wheels included, so `pip install softcut-py` serves OSC with nothing else installed and `backend="auto"` resolves to `native`. It was previously off by default and absent from the wheels -- maintained and CI-tested but reachable only through a source build, so never exercised by ordinary use. Turn it off with `SKBUILD_CMAKE_DEFINE="SOFTCUT_ENABLE_TINYOSC=OFF"` (`make build-no-tinyosc`), which falls back to python-osc. The "experimental" label is retired; IPv4-only remains a documented limitation. The CI leg that guarded the native build is inverted to guard the *disabled* build across all three OSes, since that is now the path without other coverage.
+
+  Building the transport in grants the ability to serve OSC and never a running server: importing `softcut.osc` opens no socket and starts no thread. A server exists once `SoftcutOSC` is constructed and listens once started, or when `python -m softcut.osc` is run. Two tests pin that down.
 
 - `softcut.norns`'s buffer operations now run on the shared C++ primitive rather than on numpy. `_apply` delegates to `_core._buffer_apply` and the numpy edge-envelope helper is gone, so read, copy and clear all execute the same code the standalone server does — the duplication that motivated `buffer_ops.hpp` is now actually gone rather than merely shareable. Clears no longer allocate a zero-filled array the size of the region to pass in, and the arithmetic releases the GIL while it runs. Behaviour is unchanged: the numpy implementation was moved into `tests/test_buffer_ops.py` as an independent reference the binding is checked against, since a `softcut.norns` that delegates can no longer serve as one.
 
@@ -41,6 +51,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `scsh::apply_to_buffer` takes a separate unfaded path. With no edge crossfade the envelope is 1 throughout, which collapses the blend to the target, so the branchy per-sample envelope is lifted out of the loop and a plain clear becomes a `std::fill`. Whole-buffer clears went from ~17 ms to ~1.9 ms for `2**24` frames (numpy's memset is ~2.4 ms); reads and copies without a fade benefit equally. Both hosts get it.
 
 ### Fixed
+
+- The native OSC receiver now closes its socket in `stop()` rather than leaving it to the destructor, so `SoftcutOSC.shutdown()` frees the listen port immediately as the python-osc backend already did. Previously the port stayed bound for an indeterminate time after shutdown, and a second server could not take it.
 
 - A further vendored `softcut-lib` host-portability fix, of the same family as 0.2.0's: uninitialized phase state on `Voice`. `Voice::phaseQuant`, `Voice::rawPhase` and `Voice::quantPhase` had no initializer and `Voice::reset()` did not set them — softcut assumes zero-initialized static storage, which a heap-allocated voice on a host does not get. A fresh voice therefore reported whatever the recycled allocation held, and `updateQuantPhase()` took its quantizing branch and divided by a garbage quantum. Reaching a host, that is a nonsense playhead position from `Voice.quant_phase` and `/poll/softcut/phase`, and a value beyond float range kills the python-osc phase-poll thread outright (`OverflowError` in `struct.pack`). `reset()` now restores the phase state too, so a reset voice reports where it is rather than where it was, and the defaults the extension advertises for `phase_quant`/`phase_offset` are the ones `reset()` actually establishes. Affects the standalone `clients/softcut-osc` binary equally; rebuild it with `make build-standalone` to pick the fix up.
 
