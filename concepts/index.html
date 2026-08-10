@@ -831,9 +831,12 @@
 </code></pre></div>
 <p>A voice is mono. Stereo output comes from the engine mixing several voices via their <code>level</code> and <code>pan</code>.</p>
 <h2 id="buffers">Buffers<a class="headerlink" href="#buffers" title="Permanent link">&para;</a></h2>
-<p>softcut-lib <strong>owns no buffer memory</strong> — a voice's buffer is a numpy <code>float32</code> array that <em>you</em> own and assign:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">v</span><span class="o">.</span><span class="n">buffer</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="o">**</span><span class="mi">16</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<p>softcut-lib <strong>owns no buffer memory</strong> — a voice's buffer is a <code>float32</code> buffer that <em>you</em> own and assign. Anything C-contiguous will do, so the standard library is enough and numpy is welcome:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">array</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">v</span><span class="o">.</span><span class="n">buffer</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="s2">&quot;f&quot;</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">(</span><span class="mi">4</span> <span class="o">*</span> <span class="mi">2</span><span class="o">**</span><span class="mi">16</span><span class="p">))</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>                              <span class="c1"># equally fine</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">v</span><span class="o">.</span><span class="n">buffer</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="o">**</span><span class="mi">16</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
 </code></pre></div>
 <p>Two constraints follow from the DSP:</p>
 <p>!!! warning "Buffer length must be a power of two" The read/write head wraps its index with a bitmask, so the frame count must be a positive power of two. Use <a href="../api/#functions"><code>next_power_of_two</code></a> or <a href="../api/#engine"><code>Engine.allocate</code></a>, which rounds up for you. A non-power-of-two length raises <code>ValueError</code>.</p>
@@ -890,7 +893,7 @@
 <p><strong>Live</strong> (<code>start()</code>/<code>stop()</code> or <code>with</code>) — audio runs on a background thread; <code>start()</code> returns immediately and the REPL stays responsive. See <a href="../guide/live-looping/">Live looping</a>.</p>
 </li>
 <li>
-<p><strong>Offline</strong> (<code>render()</code>) — process a numpy block synchronously and get the mixed stereo output back. Deterministic; used by the tests. See <a href="../guide/offline-rendering/">Offline rendering</a>.</p>
+<p><strong>Offline</strong> (<code>render()</code>) — process a mono block synchronously and get the mixed stereo output back. Deterministic; used by the tests. See <a href="../guide/offline-rendering/">Offline rendering</a>.</p>
 </li>
 </ul>
 <p><code>mode</code> is <code>"duplex"</code> (live mic input feeds recording voices) or <code>"playback"</code> (speakers only). Voices can also feed each other — see <a href="../guide/routing/">Routing &amp; feedback</a>.</p>

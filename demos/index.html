@@ -689,7 +689,7 @@
 
 
 <h1 id="demos">Demos<a class="headerlink" href="#demos" title="Permanent link">&para;</a></h1>
-<p>The <a href="https://github.com/shakfu/softcut-py/tree/main/demos"><code>demos/</code></a> directory has small, self-contained examples driving softcut with the audio files in <code>tests/data/</code>. Audio I/O uses only the standard library (<code>wave</code>) plus numpy.</p>
+<p>The <a href="https://github.com/shakfu/softcut-py/tree/main/demos"><code>demos/</code></a> directory has small, self-contained examples driving softcut with the audio files in <code>tests/data/</code>. The demos are written in numpy; audio I/O goes through the library's own WAV helpers (the standard library's <code>wave</code> module plus the C sample conversion).</p>
 <p>The offline demos render to WAV files under <code>build/out/</code> so you can listen to the results; most also accept <code>--play</code> to play live to the speakers instead.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>demos/01_varispeed.py<span class="w">            </span><span class="c1"># render to build/out/</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>demos/04_stereo_layers.py<span class="w"> </span>--play<span class="w">  </span><span class="c1"># also play live</span>

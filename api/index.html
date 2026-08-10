@@ -1154,7 +1154,7 @@
 </tr>
 <tr>
 <td><code>buffer</code></td>
-<td>The voice's audio buffer, a 1-D <code>float32</code> numpy array you own. The length must be a positive power of two (else <code>ValueError</code>). The voice reads from and records into this memory in place; the same array may be shared by several voices.</td>
+<td>The voice's audio buffer, a 1-D C-contiguous <code>float32</code> buffer you own (<code>array.array</code>, <code>memoryview</code> or ndarray). The length must be a positive power of two (else <code>ValueError</code>). The voice reads from and records into this memory in place; the same array may be shared by several voices.</td>
 </tr>
 </tbody>
 </table>

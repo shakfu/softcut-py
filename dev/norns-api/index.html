@@ -813,7 +813,7 @@
 <p>Status: <strong>implemented</strong> in <code>softcut.norns</code> (since 0.1.1). This document is the original design record; it is kept for rationale. What actually shipped versus the proposal below:</p>
 <ul>
 <li>
-<p><strong>Tiers A and B shipped</strong> in <code>softcut.norns.NornsSoftcut</code> (attribute passthrough and the numpy + stdlib-<code>wave</code> buffer/disk ops). The illustrative <code>_NornsSoftcut</code> sketch below is pre-implementation; the real class is <code>NornsSoftcut</code>.</p>
+<p><strong>Tiers A and B shipped</strong> in <code>softcut.norns.NornsSoftcut</code> (attribute passthrough and the buffer/disk ops). The design below reads as numpy because that is what it was implemented in; the arithmetic has since moved to the shared C++ primitives in <code>src/shared/buffer_ops.hpp</code> and the WAV conversion to <code>_core._pcm_*</code>, so the layer no longer requires numpy. The illustrative <code>_NornsSoftcut</code> sketch below is pre-implementation; the real class is <code>NornsSoftcut</code>.</p>
 </li>
 <li>
 <p><strong>Tier C (phase polling) did <em>not</em> land in the norns layer.</strong> It is instead provided by the OSC server (<code>softcut.osc</code>): a phase poll that reports <code>/poll/softcut/phase</code> — and, on the native backend, runs entirely in C (<code>_core._OscPhasePoll</code>). See <a href="../../guide/osc/">the OSC guide</a>.</p>

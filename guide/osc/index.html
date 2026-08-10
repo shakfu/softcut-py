@@ -1005,23 +1005,29 @@
 <td>native if built, else python-osc</td>
 </tr>
 <tr>
-<td><code>"python-osc"</code></td>
-<td><code>pip install softcut-py[osc]</code></td>
-<td>pure-Python; core stays numpy-only</td>
+<td><code>"native"</code></td>
+<td>nothing — built in by default</td>
+<td>dependency-free UDP + vendored tinyosc; IPv4-only</td>
 </tr>
 <tr>
-<td><code>"native"</code> (experimental)</td>
-<td>source build with <code>SOFTCUT_ENABLE_TINYOSC</code></td>
-<td>dependency-free UDP + vendored tinyosc</td>
+<td><code>"python-osc"</code></td>
+<td><code>pip install softcut-py[osc]</code></td>
+<td>pure-Python; longer-established</td>
 </tr>
 </tbody>
 </table>
-<p>!!! warning "The native transport is experimental" It is <strong>not</strong> compiled into the published wheels and must be enabled in a source build. It is IPv4-only and far less battle-tested than python-osc. Prefer python-osc unless you specifically need zero-dependency or GIL-free OSC control.</p>
-<p>The native transport is compiled in with the CMake option (source build only):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">SKBUILD_CMAKE_DEFINE</span><span class="o">=</span><span class="s2">&quot;SOFTCUT_ENABLE_TINYOSC=ON&quot;</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
+<p>tinyosc is compiled into the extension by default, including in the published
+wheels, so <code>pip install softcut-py</code> serves OSC with nothing else installed and
+<code>auto</code> resolves to <code>native</code>. That also means the transport is exercised by
+ordinary use rather than by a CI leg alone. Turn it off with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">SKBUILD_CMAKE_DEFINE</span><span class="o">=</span><span class="s2">&quot;SOFTCUT_ENABLE_TINYOSC=OFF&quot;</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>.
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># or, in this repo:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>make<span class="w"> </span>build-tinyosc
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>make<span class="w"> </span>build-no-tinyosc
 </code></pre></div>
+<p>!!! note "The server is never implicit" Importing <code>softcut.osc</code> opens no socket
+    and starts no thread. A server exists when you construct <code>SoftcutOSC</code> and
+    listens when you start it, or when you run <code>python -m softcut.osc</code>. Building
+    the transport in grants the <em>ability</em> to serve, never a running server.</p>
 <p>Whether it was built is reported by <code>softcut._core.HAVE_TINYOSC</code> (and <code>softcut.osc.NATIVE_OSC_AVAILABLE</code>). Per-voice <code>/set/param/cut/*</code> messages are parsed <strong>and dispatched entirely in C, without the GIL</strong> — via a second single-producer command queue drained on the audio thread plus atomic parameter mirrors — and the phase poll runs in C too, so a busy Python interpreter can neither delay nor be delayed by the native control path. Other addresses (buffer ops, lifecycle) fall back to a Python handler.</p>
 <p>OSC is transport-bound (a socket syscall dominates each message), so this is about <strong>latency-jitter robustness under a busy interpreter</strong>, not raw throughput. <a href="https://github.com/shakfu/softcut-py/blob/main/benchmarks/osc_jitter.py"><code>benchmarks/osc_jitter.py</code></a> measures it: under GIL contention the native dispatch tail stays roughly flat (p99 ~0.08 ms) while python-osc's blows out (~7.6 ms).</p>
 <h2 id="address-namespace">Address namespace<a class="headerlink" href="#address-namespace" title="Permanent link">&para;</a></h2>

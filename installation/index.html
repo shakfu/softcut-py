@@ -838,24 +838,30 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>softcut-py
 </code></pre></div>
 <p>(The distribution is <code>softcut-py</code>; the import name is <code>softcut</code>.)</p>
-<p>Wheels are published for CPython 3.10–3.14 on Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows. numpy is installed automatically as a dependency.</p>
+<p>Wheels are published for CPython 3.10–3.14 on Linux (x86_64/aarch64), macOS (x86_64/arm64) and Windows.</p>
+<p>There are <strong>no dependencies</strong>, numpy included. One optional extra is available:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>softcut-py<span class="o">[</span>osc<span class="o">]</span><span class="w">     </span><span class="c1"># the pure-Python OSC transport (python-osc)</span>
+</code></pre></div>
+<p>Buffers are <code>array.array("f")</code> and every entry point takes any C-contiguous
+float32 buffer, so numpy arrays work wherever you care to use them, and
+<code>numpy.asarray</code> wraps what softcut returns without copying.</p>
 <h2 id="from-source">From source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
 <p>Building from source needs a C++17 compiler and CMake; everything else (nanobind, scikit-build-core) is fetched by the build. No audio backend development packages are required — miniaudio runtime-loads the platform audio libraries (ALSA/PulseAudio/JACK, WASAPI/DirectSound/WinMM, CoreAudio).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>clone<span class="w"> </span>--recurse-submodules<span class="w"> </span>https://github.com/shakfu/softcut-py
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">cd</span><span class="w"> </span>softcut-py
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>pip<span class="w"> </span>install<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>clone<span class="w"> </span>--recurse-submodules<span class="w"> </span>https://github.com/shakfu/softcut-py
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>softcut-py
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>pip<span class="w"> </span>install<span class="w"> </span>.
 </code></pre></div>
 <h3 id="developing">Developing<a class="headerlink" href="#developing" title="Permanent link">&para;</a></h3>
 <p>The project uses <a href="https://docs.astral.sh/uv/">uv</a> and a <code>Makefile</code> wrapper:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>make<span class="w"> </span>sync<span class="w">      </span><span class="c1"># create the environment and build the extension</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>make<span class="w"> </span><span class="nb">test</span><span class="w">      </span><span class="c1"># run the test suite</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>make<span class="w"> </span>qa<span class="w">        </span><span class="c1"># test + lint (ruff) + typecheck (mypy) + format</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>make<span class="w"> </span>build<span class="w">     </span><span class="c1"># rebuild the extension after editing C++/Python</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>make<span class="w"> </span>sync<span class="w">      </span><span class="c1"># create the environment and build the extension</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>make<span class="w"> </span><span class="nb">test</span><span class="w">      </span><span class="c1"># run the test suite</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>make<span class="w"> </span>qa<span class="w">        </span><span class="c1"># test + lint (ruff) + typecheck (mypy) + format</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>make<span class="w"> </span>build<span class="w">     </span><span class="c1"># rebuild the extension after editing C++/Python</span>
 </code></pre></div>
 <p>Set <code>SOFTCUT_TEST_AUDIO=1</code> to additionally exercise a real audio device in the test suite (otherwise those tests skip).</p>
 <h2 id="optional-audio-file-io">Optional: audio file I/O<a class="headerlink" href="#optional-audio-file-io" title="Permanent link">&para;</a></h2>
-<p>softcut buffers are plain numpy arrays, so loading and saving audio is up to you. The standard library <code>wave</code> module works for PCM WAV (used by the demos); <a href="https://python-soundfile.readthedocs.io/"><code>soundfile</code></a> adds FLAC/OGG and more:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>soundfile
+<p>softcut buffers are plain float32 buffers, so loading and saving audio is up to you. The standard library <code>wave</code> module works for PCM WAV (used by the demos); <a href="https://python-soundfile.readthedocs.io/"><code>soundfile</code></a> adds FLAC/OGG and more:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span>soundfile
 </code></pre></div>
 
 
