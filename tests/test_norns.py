@@ -91,6 +91,88 @@ def test_wavio_clips_out_of_range(tmp_path):
     assert abs(back[0] - 1.0) < 1e-3 and abs(back[1] + 1.0) < 1e-3
 
 
+def test_wavio_rejects_a_ragged_interleaved_buffer(tmp_path):
+    """A flat buffer that does not divide into whole frames is an error.
+
+    `wave` would accept it and write a header claiming the floor of the frame
+    count, silently dropping the tail.
+    """
+    import array
+
+    frames = array.array("f", [0.5] * 65)
+    with pytest.raises(ValueError, match="whole 2-channel frames"):
+        write_wav(tmp_path / "r.wav", frames, int(SR), channels=2)
+    assert not (tmp_path / "r.wav").exists()
+
+
+@pytest.mark.parametrize("channels", [0, -1])
+def test_wavio_rejects_a_non_positive_channel_count(tmp_path, channels):
+    data = np.zeros(64, dtype=np.float32)
+    with pytest.raises(ValueError, match="channels must be >= 1"):
+        write_wav(tmp_path / "z.wav", data, int(SR), channels=channels)
+
+
+def test_wavio_rejects_a_channel_count_contradicting_the_shape(tmp_path):
+    data = np.zeros((64, 2), dtype=np.float32)
+    with pytest.raises(ValueError, match="contradicts"):
+        write_wav(tmp_path / "x.wav", data, int(SR), channels=3)
+
+
+def test_wavio_rejects_more_than_two_dimensions(tmp_path):
+    """A 3-D array is contiguous, so without the check it silently wrote mono."""
+    data = np.zeros((8, 4, 2), dtype=np.float32)
+    with pytest.raises(ValueError, match="1-D or"):
+        write_wav(tmp_path / "d.wav", data, int(SR))
+
+
+def test_wavio_rejects_a_non_float32_buffer(tmp_path):
+    """float64 is the easy mistake: np.sin() returns it, and the bytes would be
+    reinterpreted as float32 noise at half the length."""
+    data = np.zeros(64, dtype=np.float64)
+    with pytest.raises(ValueError, match="must be float32"):
+        write_wav(tmp_path / "n.wav", data, int(SR))
+
+
+# --- Running engine ------------------------------------------------------
+
+
+def test_buffer_can_be_switched_while_the_engine_runs():
+    """softcut.buffer(voice, b) is a live norns command, reached over OSC and
+    from a TouchOSC button, so it has to work with the callback running.
+
+    The two global buffers are the same length, so only the pointer moves and
+    the swap goes through the command queue. Every other norns test here is
+    offline, which is how a blanket refusal once passed CI.
+    """
+    import time
+
+    sc = norns.NornsSoftcut(
+        sample_rate=SR,
+        voices=1,
+        buffer_frames=4096,
+        mode="playback",
+        null_device=True,
+    )
+    sc.loop_start(1, 0.0)
+    sc.loop_end(1, 4096 / SR)
+    sc.play(1, 1)
+    sc.rate(1, 1.0)
+    assert sc.engine[0].buffer is sc.buffers[1]
+
+    sc.start()
+    try:
+        time.sleep(0.02)
+        sc.buffer(1, 2)  # queued; applied on the audio thread
+        time.sleep(0.02)
+        assert sc.engine[0].buffer is sc.buffers[2]
+        assert sc.engine[0].dropped_commands == 0
+        sc.buffer(1, 1)  # and back
+        time.sleep(0.02)
+        assert sc.engine[0].buffer is sc.buffers[1]
+    finally:
+        sc.stop()
+
+
 # --- Tier A: attribute passthrough ---------------------------------------
 
 

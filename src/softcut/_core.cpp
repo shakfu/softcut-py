@@ -21,7 +21,9 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <thread>
 #include <stdexcept>
 #include <string>
@@ -100,6 +102,15 @@ static inline void probe_stamp(float) {}
 struct Voice {
     softcut::Voice v;
     nb::object buffer_ref;  // keepalive for the numpy array passed to setBuffer
+    // The array displaced by the last swap, held one generation longer. A
+    // caller that drops its own reference must not free memory the audio thread
+    // is still reading: the swap is queued, so it may not have run yet. One
+    // generation covers the block between the push and the drain that consumes
+    // it -- it is not a proof, which would need the audio thread to report the
+    // command back, but a swap that cannot be queued raises rather than
+    // silently leaving the DSP on the old array.
+    nb::object prev_buffer_ref_;
+    size_t buffer_frames_ = 0;  // frames in buffer_ref; 0 until one is assigned
     float sample_rate = 48000.0f;
 
     // Engine mix parameters (not softcut params): read by Engine's mixer.
@@ -125,6 +136,13 @@ struct Voice {
     CommandQueue *cmd_queue_ = nullptr;
     CommandQueue *osc_queue_ = nullptr;
     std::atomic<bool> *engine_running_ = nullptr;
+
+    // Guards the engine_running_ test below against a concurrent start/stop.
+    // Held shared here, exclusive in Engine::start/stop: reading the flag and
+    // acting on it must be one step. A setter that reads "not running" and is
+    // then preempted would otherwise apply on this thread while the callback it
+    // just missed is live. Never taken on the audio thread.
+    std::shared_mutex *lifecycle_ = nullptr;
 
     // How long to wait for space before giving up on a full command queue.
     //
@@ -162,8 +180,14 @@ struct Voice {
     // Apply a softcut DSP change now, or defer it to the audio thread if an
     // engine is running (so the audio thread never reads a half-written param).
     void dsp_apply(std::function<void()> fn) {
-        if (engine_running_ != nullptr &&
-            engine_running_->load(std::memory_order_acquire)) {
+        if (engine_running_ == nullptr || lifecycle_ == nullptr) {
+            fn();  // no engine hosting us: nothing to race
+            return;
+        }
+        // The push stays inside the lock as well, so a command queued here can
+        // never land after Engine::stop's final drain and strand itself.
+        std::shared_lock<std::shared_mutex> lock(*lifecycle_);
+        if (engine_running_->load(std::memory_order_acquire)) {
             queue_apply(cmd_queue_, fn);
             return;
         }
@@ -173,9 +197,13 @@ struct Voice {
     // Like dsp_apply, but posts to the native OSC receiver's dedicated queue.
     // Called only from the OSC receiver thread, so osc_queue_ has one producer.
     void osc_apply(std::function<void()> fn) {
-        if (engine_running_ != nullptr &&
-            engine_running_->load(std::memory_order_acquire) &&
-            osc_queue_ != nullptr) {
+        if (engine_running_ == nullptr || lifecycle_ == nullptr ||
+            osc_queue_ == nullptr) {
+            fn();
+            return;
+        }
+        std::shared_lock<std::shared_mutex> lock(*lifecycle_);
+        if (engine_running_->load(std::memory_order_acquire)) {
             queue_apply(osc_queue_, fn);
             return;
         }
@@ -268,9 +296,21 @@ struct Voice {
 
     void set_sample_rate(float hz) {
         sample_rate = hz;
-        v.setSampleRate(hz);
+        // Through the queue like any other DSP setter: setSampleRate recomputes
+        // filter and slew coefficients the callback is reading.
+        Voice *self = this;
+        dsp_apply([self, hz] { self->v.setSampleRate(hz); });
     }
 
+    // Pointing a voice at a different array is the one DSP change whose safety
+    // depends on what changes. A different *length* is refused while running:
+    // ReadWriteHead::setBuffer stores the pointer and the frame count separately,
+    // once per subhead, so the callback can read a new size against an old
+    // pointer -- and it pokes as well as peeks, making that an out-of-bounds
+    // *write* with rec on. Same length, only the pointer moves, which is the
+    // norns operation (softcut.buffer(voice, b) switches a voice between the two
+    // equal global buffers, live, over OSC). That one is queued like any other
+    // DSP change, so both subheads move together at a block boundary.
     void set_buffer(nb::object arr) {
         // convert=false: never accept a temporary copy, since setBuffer only
         // stores the pointer and we must keep the real array alive.
@@ -284,8 +324,44 @@ struct Voice {
                 "softcut buffer length must be a positive power of two (got " +
                 std::to_string(n) + ")");
         }
-        v.setBuffer(a.data(), static_cast<unsigned int>(n));
+        if (engine_running_ == nullptr || lifecycle_ == nullptr) {
+            assign_buffer(a.data(), n, std::move(arr));
+            return;
+        }
+        // Shared, like dsp_apply: without it the check can read "not running"
+        // and the assignment still land in a callback that started meanwhile.
+        std::shared_lock<std::shared_mutex> lock(*lifecycle_);
+        if (!engine_running_->load(std::memory_order_acquire)) {
+            assign_buffer(a.data(), n, std::move(arr));
+            return;
+        }
+        if (n != buffer_frames_) {
+            throw std::runtime_error(
+                "cannot change a voice's buffer length while the engine is "
+                "running (have " + std::to_string(buffer_frames_) + " frames, got " +
+                std::to_string(n) + "): stop() the engine to reallocate. "
+                "Assigning a different buffer of the same length is allowed.");
+        }
+        float *ptr = a.data();
+        Voice *self = this;
+        if (!queue_apply(cmd_queue_,
+                         [self, ptr, n] {
+                             self->v.setBuffer(ptr, static_cast<unsigned int>(n));
+                         })) {
+            // Unlike a scalar, a dropped swap is not superseded by the next one:
+            // the DSP would keep reading the old array with no sign of it.
+            throw std::runtime_error(
+                "buffer swap could not be queued: the audio thread is not "
+                "draining commands");
+        }
+        prev_buffer_ref_ = std::move(buffer_ref);
         buffer_ref = std::move(arr);
+    }
+
+    void assign_buffer(float *ptr, size_t n, nb::object arr) {
+        v.setBuffer(ptr, static_cast<unsigned int>(n));
+        buffer_ref = std::move(arr);
+        buffer_frames_ = n;
     }
 
     // Process one mono block into the caller's buffer, which is returned. The
@@ -319,6 +395,7 @@ struct Engine {
     int out_channels;  // device playback channels (typically 2)
     int output_device_index;  // -1 = default device
     int input_device_index;   // -1 = default device
+    bool null_device;         // headless: silence in, output discarded
 
     std::vector<float> silence;   // zeroed mono input for playback / no input
     std::vector<float> voice_in;  // per-voice input scratch (block_size)
@@ -333,19 +410,27 @@ struct Engine {
 
     CommandQueue queue;      // producer: Python control thread (GIL held)
     CommandQueue osc_queue;  // producer: native OSC receiver thread (GIL-free)
+    // True exactly while the device callback can be running: raised before
+    // ma_device_start and lowered only after ma_device_stop has returned. It is
+    // also the started/stopped flag itself -- there is no second bool that could
+    // disagree with it.
     std::atomic<bool> running{false};
+
+    // Exclusive across a start/stop transition, shared by the voices while they
+    // decide to queue or apply. See Voice::lifecycle_.
+    std::shared_mutex lifecycle;
 
     ma_context context;
     bool context_inited = false;
     ma_device device;
-    bool device_inited = false;
-    bool device_started = false;
+    bool device_inited = false;  // allocated; says nothing about the callback
 
     Engine(std::vector<Voice *> vs, float sr, int block, bool dup, int out_ch,
-           int out_dev, int in_dev)
+           int out_dev, int in_dev, bool null_dev)
         : voices(std::move(vs)), n_voices(static_cast<int>(voices.size())),
           sample_rate(sr), block_size(block), duplex(dup), out_channels(out_ch),
-          output_device_index(out_dev), input_device_index(in_dev) {
+          output_device_index(out_dev), input_device_index(in_dev),
+          null_device(null_dev) {
         if (block_size < 1) throw std::invalid_argument("block_size must be >= 1");
         if (out_channels < 1) throw std::invalid_argument("out_channels must be >= 1");
         silence.assign(block_size, 0.0f);
@@ -362,17 +447,20 @@ struct Engine {
             vp->cmd_queue_ = &queue;
             vp->osc_queue_ = &osc_queue;
             vp->engine_running_ = &running;
+            vp->lifecycle_ = &lifecycle;
         }
     }
 
     ~Engine() {
-        running.store(false, std::memory_order_release);
-        if (device_inited) ma_device_uninit(&device);  // joins the audio thread
+        stop();  // lowers the flag and drains, with the callback already joined
+        if (device_inited) ma_device_uninit(&device);
         if (context_inited) ma_context_uninit(&context);
+        std::unique_lock<std::shared_mutex> lock(lifecycle);
         for (Voice *vp : voices) {  // never leave dangling pointers into us
             vp->cmd_queue_ = nullptr;
             vp->osc_queue_ = nullptr;
             vp->engine_running_ = nullptr;
+            vp->lifecycle_ = nullptr;
         }
     }
 
@@ -458,22 +546,33 @@ struct Engine {
     }
 
     void start() {
-        if (device_started) return;
+        std::unique_lock<std::shared_mutex> lock(lifecycle);
+        if (running.load(std::memory_order_acquire)) return;
         if (!device_inited) {
             ma_device_id playback_id, capture_id;
             ma_device_id *p_playback_id = nullptr;
             ma_device_id *p_capture_id = nullptr;
 
-            // Explicit device selection requires a context to resolve ids.
-            if (output_device_index >= 0 || input_device_index >= 0) {
+            // The null backend and explicit device selection both need a context.
+            if (null_device || output_device_index >= 0 || input_device_index >= 0) {
                 if (!context_inited) {
-                    if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+                    ma_result r;
+                    if (null_device) {
+                        ma_backend backends[] = {ma_backend_null};
+                        r = ma_context_init(backends, 1, nullptr, &context);
+                    } else {
+                        r = ma_context_init(nullptr, 0, nullptr, &context);
+                    }
+                    if (r != MA_SUCCESS)
                         throw std::runtime_error("failed to initialize audio context");
                     context_inited = true;
                 }
-                scsh::resolve_device_ids(context, output_device_index,
-                                         input_device_index, duplex, playback_id,
-                                         capture_id, p_playback_id, p_capture_id);
+                // The null backend has one synthetic device, so an index means
+                // nothing there; leave both ids null and take it.
+                if (!null_device)
+                    scsh::resolve_device_ids(context, output_device_index,
+                                             input_device_index, duplex, playback_id,
+                                             capture_id, p_playback_id, p_capture_id);
             }
 
             ma_device_config cfg = scsh::make_device_config(
@@ -484,18 +583,25 @@ struct Engine {
                 throw std::runtime_error("failed to initialize audio device");
             device_inited = true;
         }
-        if (ma_device_start(&device) != MA_SUCCESS)
-            throw std::runtime_error("failed to start audio device");
-        device_started = true;
+        // Raise the flag before starting: ma_device_start can call back before
+        // it returns, and a setter that still read "not running" would write DSP
+        // state out from under that callback.
         running.store(true, std::memory_order_release);
+        if (ma_device_start(&device) != MA_SUCCESS) {
+            running.store(false, std::memory_order_release);
+            drain_commands();  // nothing else will consume what the window queued
+            throw std::runtime_error("failed to start audio device");
+        }
     }
 
     void stop() {
-        if (!device_started) return;
-        running.store(false, std::memory_order_release);
+        std::unique_lock<std::shared_mutex> lock(lifecycle);
+        if (!running.load(std::memory_order_acquire)) return;
         ma_device_stop(&device);  // synchronous: no callback runs after this
-        drain_commands();         // apply anything queued but not yet consumed
-        device_started = false;
+        // Lower the flag only once the callback is joined, for the same reason
+        // start raises it early.
+        running.store(false, std::memory_order_release);
+        drain_commands();  // apply anything queued but not yet consumed
     }
 
     static void data_callback(ma_device *dev, void *pOutput, const void *pInput,
@@ -968,7 +1074,10 @@ NB_MODULE(_core, m) {
             [](Voice &s) { return s.buffer_ref; },
             [](Voice &s, nb::object a) { s.set_buffer(std::move(a)); },
             "The voice's audio buffer as a 1-D float32 numpy array. The voice "
-            "reads from and records into this memory in place.")
+            "reads from and records into this memory in place. While the engine "
+            "runs, a different buffer of the same length is accepted and swapped "
+            "on the audio thread; a different length raises, since reallocating "
+            "needs the device stopped.")
 
         // transport / loop
         .FPROP("rate", rate_, setRate)
@@ -1070,9 +1179,9 @@ NB_MODULE(_core, m) {
     nb::class_<Engine>(m, "_Engine",
         "Low-level multi-voice realtime host over a miniaudio device. Use the "
         "softcut.Engine facade instead.")
-        .def(nb::init<std::vector<Voice *>, float, int, bool, int, int, int>(),
+        .def(nb::init<std::vector<Voice *>, float, int, bool, int, int, int, bool>(),
             "voices"_a, "sample_rate"_a, "block_size"_a, "duplex"_a, "out_channels"_a,
-            "output_device"_a, "input_device"_a,
+            "output_device"_a, "input_device"_a, "null_device"_a,
             nb::keep_alive<1, 2>())
         .def("start", &Engine::start, nb::call_guard<nb::gil_scoped_release>(),
             "Open (if needed) and start the audio device. Non-blocking.")
@@ -1087,7 +1196,8 @@ NB_MODULE(_core, m) {
             "Set the feedback gain from voice src's output into voice dst's input.")
         .def("get_feedback", &Engine::get_feedback, "src"_a, "dst"_a,
             "Get the feedback gain from voice src into voice dst.")
-        .def_prop_ro("running", [](Engine &e) { return e.device_started; },
+        .def_prop_ro("running",
+            [](Engine &e) { return e.running.load(std::memory_order_acquire); },
             "True while the audio device is started.")
         .def_prop_ro("block_size", [](Engine &e) { return e.block_size; })
         .def_prop_ro("out_channels", [](Engine &e) { return e.out_channels; })

@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `Engine(null_device=True)` opens miniaudio's null backend: the callback runs and is paced in real time, input is silence, output is discarded. The live-device tests run on it now instead of being skipped without hardware, so `make test` covers the audio thread, the command queue and the start/stop lifecycle. One smoke test still needs real hardware and stays behind `SOFTCUT_TEST_AUDIO=1`.
+
+### Fixed
+
+- **A DSP setter could still be applied on the calling thread while the audio callback was live.** `Engine.start()` raised its running flag only after `ma_device_start()` returned, and `stop()` lowered it before `ma_device_stop()`, so across both transitions a setter read "not running" and took the direct path into softcut state the callback was reading. The flag now goes up before the device starts and down only after it has stopped.
+
+  Ordering alone is not enough: the read and the apply are two steps, so a setter preempted between them applies into a callback that came up in the gap. A `shared_mutex` -- shared in `Voice::dsp_apply`/`osc_apply`, exclusive across a start/stop transition -- makes the decision and the act one step. It also covers the queue push, so a command enqueued as `stop()` runs cannot land after its final drain and strand itself until the next start. The audio thread never touches the lock.
+
+  `device_started` is gone; `running` is the one flag, and `Engine.running` reads it rather than an unsynchronized `bool`.
+
+- **Changing a voice's buffer *length* while the engine ran corrupted memory.** `ReadWriteHead::setBuffer` stores the pointer and the frame count separately, once per subhead, so the audio thread could read a new count against an old pointer -- and the head pokes as well as peeks, making that an out-of-bounds *write* with `rec` on. It raises now, as does `Engine.allocate()` when the rounded length differs from what the voices hold. Stop the engine to reallocate, or allocate once at the longest length you need and move the loop points.
+
+  A same-length swap is accepted and goes through the command queue, so both subheads move together at a block boundary. Refusing it outright would have broken `softcut.buffer(voice, b)`, the norns command that switches a voice between the two equal global buffers -- served over OSC as `/set/param/cut/buffer` and wired to a TouchOSC button, both of which drive a running engine. The displaced array is held one generation longer, so a caller that drops its own reference does not free memory a queued swap has not consumed yet; a swap that cannot be queued raises rather than leaving the DSP on the old array with no sign of it.
+
+  `NornsSoftcut` gained `null_device` and a test that switches buffers with the callback live. Every other norns, OSC and TouchOSC test is offline, which is how the blanket refusal passed the suite.
+
+- **`Voice.sample_rate` bypassed the command queue entirely**, calling `setSampleRate` on the control thread while the callback read the filter and slew coefficients it recomputes. It is queued like every other DSP setter now.
+
+- **`write_wav()` accepted metadata it could not honour**, writing a malformed or silently truncated file. A flat buffer whose length did not divide by `channels` lost the partial frame; a 3-D array was contiguous, so it was written as mono; a `float64` array (what `np.sin()` returns) was reinterpreted as `float32` noise at half the length. It now rejects a non-`float32` buffer, anything but 1-D or 2-D, `channels < 1`, a `channels` that contradicts a 2-D shape, and a length that does not divide into whole frames -- before creating the parent directory or opening the file.
+
+### Changed
+
+- CI builds and smoke-tests the standalone OSC server (`make test-standalone`). It shares the DSP, mixer and device code with the extension but none of its build, so no other leg compiled it.
+
 ## [0.4.2]
 
 ### Added

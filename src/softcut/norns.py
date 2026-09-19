@@ -28,7 +28,10 @@ changes (Tier D) are not implemented here; see ``docs/dev/norns-api.md``.
 
 Thread-safety rule (matches norns): buffer operations write into the existing
 arrays in place and never reallocate, so they are safe against a running audio
-thread. Assigning a whole new buffer array is only safe while stopped.
+thread. ``buffer()`` switches a voice between the two global arrays, which are
+the same length, so it is safe while running too -- the swap goes through the
+command queue. Assigning an array of a *different* length needs the engine
+stopped.
 """
 
 from __future__ import annotations
@@ -106,10 +109,16 @@ class NornsSoftcut:
         voices: int = _DEFAULT_VOICES,
         buffer_frames: int = _DEFAULT_BUFFER_FRAMES,
         mode: str = "duplex",
+        null_device: bool = False,
     ) -> None:
         self.sample_rate = float(sample_rate)
         self._n = int(voices)
-        self._eng = Engine(voices=voices, sample_rate=sample_rate, mode=mode)
+        self._eng = Engine(
+            voices=voices,
+            sample_rate=sample_rate,
+            mode=mode,
+            null_device=null_device,
+        )
         n = next_power_of_two(int(buffer_frames))
         self._buf = {b: array.array("f", bytes(4 * n)) for b in _BUFFERS}
         self._assign: dict[int, int] = {}

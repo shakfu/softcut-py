@@ -287,10 +287,6 @@ def test_dropped_commands_starts_at_zero_and_is_read_only():
         v.dropped_commands = 1
 
 
-@pytest.mark.skipif(
-    not os.environ.get("SOFTCUT_TEST_AUDIO"),
-    reason="set SOFTCUT_TEST_AUDIO=1 to exercise a real audio device",
-)
 def test_a_burst_of_live_parameter_changes_is_not_dropped():
     """The bounded retry should absorb a realistic control burst.
 
@@ -300,12 +296,9 @@ def test_a_burst_of_live_parameter_changes_is_not_dropped():
     """
     import time
 
-    eng = Engine(voices=1, sample_rate=SR)
+    eng = Engine(voices=1, sample_rate=SR, null_device=True)
     eng.allocate(seconds=1.0)
-    try:
-        eng.start()
-    except RuntimeError as exc:
-        pytest.skip(f"no audio device available: {exc}")
+    eng.start()
     try:
         for i in range(5000):
             eng[0].rate = 1.0 + (i % 8) * 0.01
@@ -726,14 +719,178 @@ def test_softcut_alias_is_deprecated():
     assert isinstance(sc, Engine)
 
 
-# --- Live device (opt-in) ------------------------------------------------
+# --- Running device ------------------------------------------------------
+#
+# These drive the real callback on miniaudio's null backend (silence in, output
+# discarded), so the audio thread, the command queue and the start/stop
+# lifecycle are covered without hardware. `SOFTCUT_TEST_AUDIO=1` adds the one
+# test below that needs a real device.
+
+
+def test_live_device_smoke():
+    import time
+
+    eng = Engine(voices=1, mode="playback", block_size=256, null_device=True)
+    eng.allocate(seconds=1.0)
+    eng[0].configure(loop_region=(0, 1))
+    eng[0].play = True
+    eng[0].cut_to(0.0)
+    eng.start()
+    try:
+        time.sleep(0.05)
+        assert eng.running is True
+    finally:
+        eng.stop()
+    assert eng.running is False
+
+
+def test_command_queue_applies_param_while_running():
+    """A param set while the device runs is applied on the audio thread."""
+    import time
+
+    sr, n = 48000, 65536
+    eng = Engine(
+        voices=1, sample_rate=sr, mode="playback", block_size=256, null_device=True
+    )
+    eng[0].buffer = (0.2 * np.sin(2 * np.pi * 200 * np.arange(n) / sr)).astype(
+        np.float32
+    )
+    eng[0].configure(loop_region=(0, n / sr), rate=1.0)
+    eng[0].play = True
+    eng[0].cut_to(0.0)
+    eng.start()
+    try:
+        time.sleep(0.05)
+        eng[0].rate = 3.0  # enqueued; applied on the audio thread
+        time.sleep(0.1)
+    finally:
+        eng.stop()  # drains any remaining commands
+
+    # the queued rate change took effect: the head now advances ~3x real time
+    p0 = eng[0].position
+    eng.render(np.zeros(int(0.1 * sr), dtype=np.float32))
+    assert eng[0].position - p0 > 0.2
+
+
+def test_setters_racing_repeated_start_stop_stay_on_the_queue():
+    """Setters hammering the engine across start/stop cycles must not corrupt it.
+
+    The window this guards: a setter reads "not running" and applies on its own
+    thread, while the callback the flag had not yet announced is already live.
+    The engine survives, keeps its restart behaviour, and the last value written
+    is the one that is read back.
+    """
+    import threading
+    import time
+
+    eng = Engine(
+        voices=1, sample_rate=SR, mode="playback", block_size=64, null_device=True
+    )
+    eng.allocate(seconds=1.0)
+    eng[0].configure(loop_region=(0, 1))
+    eng[0].play = True
+
+    stop_setting = threading.Event()
+
+    def hammer():
+        i = 0
+        while not stop_setting.is_set():
+            i += 1
+            eng[0].rate = 1.0 + (i % 16) * 0.01
+            eng[0].pre_level = (i % 4) * 0.25
+            eng[0].cut_to((i % 8) * 0.1)
+
+    t = threading.Thread(target=hammer, daemon=True)
+    t.start()
+    try:
+        for _ in range(20):
+            eng.start()
+            assert eng.running is True
+            time.sleep(0.005)
+            eng.stop()
+            assert eng.running is False
+    finally:
+        stop_setting.set()
+        t.join(timeout=5.0)
+        assert not t.is_alive()
+
+    # Quiet now: a set with the device stopped still lands, and reads back.
+    eng[0].rate = 0.5
+    assert eng[0].rate == pytest.approx(0.5)
+    eng.start()
+    try:
+        time.sleep(0.02)
+        assert eng.running is True
+    finally:
+        eng.stop()
+
+
+def test_changing_buffer_length_while_running_is_refused():
+    """A different frame count under a live callback is an out-of-bounds write.
+
+    ReadWriteHead::setBuffer stores the pointer and the count separately, once
+    per subhead, so the audio thread can read a new count against an old
+    pointer -- and it pokes as well as peeks.
+    """
+    eng = Engine(
+        voices=1, sample_rate=SR, mode="playback", block_size=64, null_device=True
+    )
+    buf = eng.allocate(seconds=1.0)
+    eng.start()
+    try:
+        with pytest.raises(RuntimeError, match="buffer length while the engine"):
+            eng[0].buffer = np.zeros(len(buf) * 2, dtype=np.float32)
+        with pytest.raises(RuntimeError, match="buffer length while the engine"):
+            eng.allocate(seconds=0.25)
+        # refused, not half-applied: the voice still holds the original array
+        assert eng[0].buffer is buf
+    finally:
+        eng.stop()
+
+    # a different length is allowed again once stopped
+    eng[0].buffer = np.zeros(4096, dtype=np.float32)
+    assert len(eng[0].buffer) == 4096
+
+
+def test_swapping_to_a_same_length_buffer_while_running_is_queued():
+    """The norns operation: softcut.buffer(voice, b) between two equal buffers.
+
+    Only the pointer moves, so it goes through the command queue like any other
+    DSP change and both subheads move together at a block boundary.
+    """
+    import time
+
+    sr, n = 48000, 65536
+    eng = Engine(
+        voices=1, sample_rate=sr, mode="playback", block_size=64, null_device=True
+    )
+    a = np.zeros(n, dtype=np.float32)
+    b = np.full(n, 0.5, dtype=np.float32)
+    eng[0].buffer = a
+    eng[0].configure(loop_region=(0, n / sr), rate=1.0)
+    eng[0].play = True
+    eng[0].cut_to(0.0)
+    eng.start()
+    try:
+        time.sleep(0.02)
+        eng[0].buffer = b  # queued, applied on the audio thread
+        assert eng[0].buffer is b
+        time.sleep(0.02)
+        assert eng[0].dropped_commands == 0
+    finally:
+        eng.stop()
+
+    # the swap reached the DSP: rendering now reads b's samples, not a's zeros
+    out = eng.render(np.zeros(256, dtype=np.float32))
+    assert np.max(np.abs(np.asarray(out))) > 0.1
 
 
 @pytest.mark.skipif(
     not os.environ.get("SOFTCUT_TEST_AUDIO"),
     reason="set SOFTCUT_TEST_AUDIO=1 to exercise a real audio device",
 )
-def test_live_device_smoke():
+def test_real_device_smoke():
+    """The one case the null backend cannot stand in for: actual hardware."""
     import time
 
     eng = Engine(voices=1, mode="playback", block_size=256)
@@ -751,36 +908,3 @@ def test_live_device_smoke():
     finally:
         eng.stop()
     assert eng.running is False
-
-
-@pytest.mark.skipif(
-    not os.environ.get("SOFTCUT_TEST_AUDIO"),
-    reason="set SOFTCUT_TEST_AUDIO=1 to exercise a real audio device",
-)
-def test_command_queue_applies_param_while_running():
-    """A param set while the device runs is applied on the audio thread."""
-    import time
-
-    sr, n = 48000, 65536
-    eng = Engine(voices=1, sample_rate=sr, mode="playback", block_size=256)
-    eng[0].buffer = (0.2 * np.sin(2 * np.pi * 200 * np.arange(n) / sr)).astype(
-        np.float32
-    )
-    eng[0].configure(loop_region=(0, n / sr), rate=1.0)
-    eng[0].play = True
-    eng[0].cut_to(0.0)
-    try:
-        eng.start()
-    except RuntimeError as e:
-        pytest.skip(f"no audio device available: {e}")
-    try:
-        time.sleep(0.05)
-        eng[0].rate = 3.0  # enqueued; applied on the audio thread
-        time.sleep(0.1)
-    finally:
-        eng.stop()  # drains any remaining commands
-
-    # the queued rate change took effect: the head now advances ~3x real time
-    p0 = eng[0].position
-    eng.render(np.zeros(int(0.1 * sr), dtype=np.float32))
-    assert eng[0].position - p0 > 0.2

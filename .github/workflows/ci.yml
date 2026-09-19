@@ -76,6 +76,23 @@ jobs:
       - name: Test (python-osc transport only)
         run: uv run pytest tests/ -q
 
+  # The standalone server shares the DSP, mixer and device code with the
+  # extension but none of its build, so nothing else here compiles it. It runs
+  # on miniaudio's null backend, so it needs no audio hardware.
+  standalone:
+    name: Standalone OSC server
+    needs: qa
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build and smoke-test the standalone server
+        run: make test-standalone
+
   build-smoke:
     name: Build smoke (${{ matrix.os }} / py${{ matrix.python }})
     needs: qa

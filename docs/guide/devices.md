@@ -32,4 +32,12 @@ eng = softcut.Engine(
 
 `input_device` is only used in `"duplex"` mode. Selection is resolved when the device is opened (on `start()`), so an out-of-range index raises there.
 
+## Running without hardware
+
+`null_device=True` opens miniaudio's null backend instead: the callback runs and is paced in real time, input is silence, and output is discarded. Device indices are ignored. This is how the test suite covers the audio thread, the command queue and `start()`/`stop()` on machines and CI runners with no sound card.
+
+```python
+eng = softcut.Engine(voices=1, mode="playback", null_device=True)
+```
+
 !!! note `block_size`, `sample_rate` and `out_channels` are also set at construction. miniaudio resamples and remixes the hardware device to the format you ask for, and capture is summed to mono.

@@ -89,21 +89,46 @@ def write_wav(
     keep working; pass ``channels`` to say so explicitly for a flat interleaved
     buffer. Samples are clipped to [-1, 1] before quantizing, and parent
     directories are created as needed.
+
+    Raises:
+        ValueError: If ``data`` is not float32, is neither 1-D nor 2-D,
+            ``channels`` is below 1 or disagrees with a 2-D shape, or a flat
+            buffer does not divide into whole frames.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
 
     view = memoryview(data)
+    if view.format != "f":
+        raise ValueError(f"data must be float32, got format {view.format!r}")
+    if view.ndim not in (1, 2):
+        raise ValueError(
+            f"data must be 1-D or (frames, channels) 2-D, got {view.ndim}-D"
+        )
+    # `shape` is Optional only for a released buffer, which this is not.
+    shape = view.shape
+    inferred = shape[1] if view.ndim == 2 and shape is not None else None
+
     if channels is None:
-        # `shape` is Optional only for a released buffer, which this is not.
-        shape = view.shape
-        channels = shape[1] if view.ndim == 2 and shape is not None else 1
+        channels = inferred if inferred is not None else 1
+    channels = int(channels)
+    if channels < 1:
+        raise ValueError(f"channels must be >= 1, got {channels}")
+    if inferred is not None and channels != inferred:
+        raise ValueError(
+            f"channels={channels} contradicts the 2-D shape {tuple(shape or ())}"
+        )
+
     # Flatten to 1-D float32 for the encoder; `cast` demands C-contiguity, which
     # is what the encoder needs anyway.
     flat = view.cast("B").cast("f")
+    if len(flat) % channels:
+        raise ValueError(
+            f"{len(flat)} samples do not divide into whole {channels}-channel frames"
+        )
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(int(channels))
+        w.setnchannels(channels)
         w.setsampwidth(2)
         w.setframerate(int(sr))
         w.writeframes(_core._pcm_encode_s16(flat))

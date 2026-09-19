@@ -18,7 +18,7 @@ A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are 
 | Attribute | Description |
 | --- | --- |
 | `sample_rate` | Sample rate in Hz. |
-| `buffer` | The voice's audio buffer, a 1-D C-contiguous `float32` buffer you own (`array.array`, `memoryview` or ndarray). The length must be a positive power of two (else `ValueError`). The voice reads from and records into this memory in place; the same array may be shared by several voices. |
+| `buffer` | The voice's audio buffer, a 1-D C-contiguous `float32` buffer you own (`array.array`, `memoryview` or ndarray). The length must be a positive power of two (else `ValueError`). The voice reads from and records into this memory in place; the same array may be shared by several voices. While the engine runs, a different buffer of the same length is swapped on the audio thread; a different length raises `RuntimeError`. |
 
 ### Transport and loop
 
@@ -116,6 +116,7 @@ Engine(
     out_channels: int = 2,
     output_device: int = -1,     # index from list_devices(); -1 = default
     input_device: int = -1,
+    null_device: bool = False,   # headless backend, for tests and CI
 )
 ```
 
@@ -142,7 +143,7 @@ A multi-voice host owning its voices and an audio device. It is a context manage
 
 | Method | Description |
 | --- | --- |
-| `allocate(seconds=None, frames=None, shared=True)` | Allocate and assign zeroed `float32` buffer(s), rounded up to a power of two. Provide exactly one of `seconds`/`frames`. `shared=True` gives all voices one buffer; `False` gives each its own. Returns the buffer or the list of buffers. |
+| `allocate(seconds=None, frames=None, shared=True)` | Allocate and assign zeroed `float32` buffer(s), rounded up to a power of two. Provide exactly one of `seconds`/`frames`. `shared=True` gives all voices one buffer; `False` gives each its own. Returns the buffer or the list of buffers. Raises if the device is running and the rounded length differs from what the voices hold. |
 | `sync(follow, lead, offset=0.0)` | Cut the `follow` voice to the `lead` voice's position + `offset`. |
 | `feedback(src, dst, amount=None)` | Get (omit `amount`) or set the feedback gain from voice `src`'s output into voice `dst`'s input. `src == dst` is self-feedback. Returns the engine when setting. |
 | `render(input=None, out=None, *, seconds=None)` | Offline: process a 1-D `float32` mono buffer through all voices, or `seconds` of silence -- exactly one of the two. Writes interleaved frames into `out`, or into a fresh `array.array("f")` of `n * out_channels` samples, and returns it. Raises if the device is running. |

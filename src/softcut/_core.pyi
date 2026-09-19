@@ -98,6 +98,7 @@ class _Engine:
         out_channels: int,
         output_device: int,
         input_device: int,
+        null_device: bool,
     ) -> None: ...
     @property
     def running(self) -> bool: ...

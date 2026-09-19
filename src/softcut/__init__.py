@@ -219,6 +219,8 @@ class Engine(Sequence[Voice]):
     outputs go to the speakers) or ``"playback"`` (speakers only; recording is
     from pre-loaded buffers). ``output_device``/``input_device`` select a device
     by its index from :func:`list_devices` (``-1`` uses the system default).
+    ``null_device=True`` runs the same callback on miniaudio's null backend --
+    silence in, output discarded, no hardware -- for tests and CI.
     Voices mix to stereo via their ``level``/``pan``; ``feedback()`` routes one
     voice's output into another's input.
     """
@@ -232,6 +234,7 @@ class Engine(Sequence[Voice]):
         out_channels: int = 2,
         output_device: int = -1,
         input_device: int = -1,
+        null_device: bool = False,
     ) -> None:
         if voices < 1:
             raise ValueError("voices must be >= 1")
@@ -249,6 +252,7 @@ class Engine(Sequence[Voice]):
             int(out_channels),
             int(output_device),
             int(input_device),
+            bool(null_device),
         )
 
     # sequence protocol
@@ -308,6 +312,12 @@ class Engine(Sequence[Voice]):
         every voice points at the same buffer (norns-style shared memory); with
         ``shared=False`` each voice gets its own. Returns the shared buffer, or
         the list of per-voice buffers.
+
+        Raises:
+            RuntimeError: If the engine is running and the rounded length
+                differs from what the voices already hold. Reallocating under a
+                live callback is refused; allocating the same length is a swap
+                and is allowed.
         """
         if (seconds is None) == (frames is None):
             raise ValueError("provide exactly one of seconds or frames")
