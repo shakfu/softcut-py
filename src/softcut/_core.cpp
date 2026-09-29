@@ -278,6 +278,12 @@ struct Voice {
     std::atomic<float> phase_quant_{0.0f};
     std::atomic<float> phase_offset_{0.0f};
 
+    // Crossfade curves (softcut::FadeCurves::init defaults)
+    std::atomic<int> rec_fade_shape_{softcut::FadeCurves::Raised};
+    std::atomic<int> pre_fade_shape_{softcut::FadeCurves::Linear};
+    std::atomic<float> rec_delay_ratio_{1.0f / 128.0f};
+    std::atomic<float> pre_window_ratio_{1.0f / 8.0f};
+
     // Pre filter
     std::atomic<float> pre_filter_fc_{16000.0f};
     std::atomic<float> pre_filter_rq_{4.0f};
@@ -319,6 +325,10 @@ struct Voice {
         rate_slew_time_ = 0.001f;
         phase_quant_ = 0.0f;
         phase_offset_ = 0.0f;
+        rec_fade_shape_ = softcut::FadeCurves::Raised;
+        pre_fade_shape_ = softcut::FadeCurves::Linear;
+        rec_delay_ratio_ = 1.0f / 128.0f;
+        pre_window_ratio_ = 1.0f / 8.0f;
         pre_filter_fc_ = 16000.0f;
         pre_filter_rq_ = 4.0f;
         pre_filter_lp_ = 1.0f;
@@ -1108,6 +1118,27 @@ private:
             probe_stamp(x ? 1.0f : 0.0f);                                \
         })
 
+static const char *const kFadeShapes[] = {"linear", "sine", "raised"};
+
+static softcut::FadeCurves::Shape fade_shape(const std::string &name) {
+    for (int i = 0; i < 3; ++i)
+        if (name == kFadeShapes[i]) return static_cast<softcut::FadeCurves::Shape>(i);
+    throw std::invalid_argument(
+        "fade shape must be 'linear', 'sine' or 'raised' (got '" + name + "')");
+}
+
+// fade shape property: a name on the Python side, a FadeCurves::Shape below
+#define SHAPEPROP(name, field, setter)                                   \
+    def_prop_rw(                                                          \
+        name,                                                            \
+        [](Voice &s) { return kFadeShapes[s.field.load(std::memory_order_relaxed)]; }, \
+        [](Voice &s, const std::string &x) {                             \
+            const softcut::FadeCurves::Shape shape = fade_shape(x);      \
+            s.field.store(shape, std::memory_order_relaxed);             \
+            Voice *p = &s;                                                \
+            s.dsp_apply([p, shape] { p->v.setter(shape); });             \
+        })
+
 NB_MODULE(_core, m) {
     m.doc() = "Python binding for softcut-lib's per-voice DSP engine.";
 
@@ -1171,6 +1202,12 @@ NB_MODULE(_core, m) {
         .FPROP("phase_quant", phase_quant_, setPhaseQuant)
         .FPROP("phase_offset", phase_offset_, setPhaseOffset)
 
+        // crossfade curves
+        .SHAPEPROP("rec_fade_shape", rec_fade_shape_, setRecFadeShape)
+        .SHAPEPROP("pre_fade_shape", pre_fade_shape_, setPreFadeShape)
+        .FPROP("rec_delay_ratio", rec_delay_ratio_, setRecDelayRatio)
+        .FPROP("pre_window_ratio", pre_window_ratio_, setPreWindowRatio)
+
         // pre filter
         .FPROP("pre_filter_fc", pre_filter_fc_, setPreFilterFc)
         .FPROP("pre_filter_rq", pre_filter_rq_, setPreFilterRq)
@@ -1215,6 +1252,14 @@ NB_MODULE(_core, m) {
         .def_prop_ro("saved_position", [](Voice &s) { return s.v.getSavedPosition(); },
             "Head position in seconds, updated once per processed block; safe "
             "to read from any thread.")
+        .def_prop_ro("_heads", [](Voice &s) {
+                return nb::make_tuple(
+                    s.v.getSavedHeadPosition(0), s.v.getSavedHeadFade(0),
+                    s.v.getSavedHeadPosition(1), s.v.getSavedHeadFade(1),
+                    s.v.getSavedActiveHead());
+            },
+            "(position0, fade0, position1, fade1, active) as of the last block; "
+            "see softcut.Voice.heads.")
         .def_prop_ro("quant_phase", [](Voice &s) { return s.v.getQuantPhase(); },
             "Quantized phase (in units of phase_quant).")
 

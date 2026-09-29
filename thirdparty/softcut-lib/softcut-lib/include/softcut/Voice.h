@@ -76,6 +76,15 @@ namespace softcut {
 
         void setPostFilterDry(float);
 
+        // crossfade curves; see FadeCurves
+        void setRecFadeShape(FadeCurves::Shape shape);
+
+        void setPreFadeShape(FadeCurves::Shape shape);
+
+        void setRecDelayRatio(float x);
+
+        void setPreWindowRatio(float x);
+
         void cutToPos(float sec);
 
         // process a single channel
@@ -103,6 +112,14 @@ namespace softcut {
 
         bool getSavedRecOnceFlag();
 
+        // subhead i's position (seconds) and fade, and which subhead is
+        // active, as of the last block; use these from non-audio threads
+        float getSavedHeadPosition(int i);
+
+        float getSavedHeadFade(int i);
+
+        int getSavedActiveHead();
+
 	float getActivePosition();
 
 	// use this from non-audio threads
@@ -119,6 +136,8 @@ namespace softcut {
         void updateQuantPhase();
 
         void publishFlags();
+
+        void publishHeads();
 
     private:
         float *buf;
@@ -170,6 +189,9 @@ namespace softcut {
         std::atomic<phase_t> quantPhase{0};
         std::atomic<bool> savedRecFlag{false};
         std::atomic<bool> savedRecOnceFlag{false};
+        std::atomic<phase_t> savedHeadPhase[2] = {{0}, {0}};
+        std::atomic<float> savedHeadFade[2] = {{0.f}, {0.f}};
+        std::atomic<int> savedActiveHead{0};
 
     private:
 

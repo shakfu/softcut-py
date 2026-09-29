@@ -15,6 +15,17 @@ using namespace softcut;
 
 static constexpr float fpi = 3.1415926535898f;
 
+// Table points for a ratio of the fade, clamped to [0, max]. Upstream casts the
+// unclamped product: a ratio above 1 overruns the table, and a negative or NaN
+// ratio is undefined behaviour.
+static unsigned int tableFrames(float ratio, unsigned int max) {
+    const float x = ratio * FadeCurves::fadeBufSize;
+    if (!(x > 0.f)) {
+        return 0;
+    }
+    return x >= static_cast<float>(max) ? max : static_cast<unsigned int>(x);
+}
+
 void FadeCurves::init(bool fix) {
     fixQuirks = fix;
     setPreShape(FadeCurves::Shape::Linear);
@@ -30,8 +41,8 @@ void FadeCurves::calcRecFade() {
     unsigned int n = fadeBufSize - 1;
     // build rec-fade curve
     // this will be scaled by base rec level
-    unsigned int ndr = std::max(recDelayMinFrames,
-                                static_cast<unsigned int>(recDelayRatio * fadeBufSize));
+    unsigned int ndr = std::min(n, std::max(recDelayMinFrames,
+                                            tableFrames(recDelayRatio, n)));
     unsigned int nr = n - ndr;
 
     unsigned int i = 0;
@@ -84,8 +95,8 @@ void FadeCurves::calcPreFade() {
     float buf[fadeBufSize];
     // build pre-fade curve
     // this will be scaled and added to the base pre value (mapping [0, 1] -> [pre, 1])
-    unsigned int nwp = std::max(preWindowMinFrames,
-                                static_cast<unsigned int>(preWindowRatio * fadeBufSize));
+    unsigned int nwp = std::min(fadeBufSize, std::max(preWindowMinFrames,
+                                                      tableFrames(preWindowRatio, fadeBufSize)));
 
     unsigned int i = 0;
     float x = 0.f;

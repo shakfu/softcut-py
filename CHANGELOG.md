@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `quirks="upstream" | "fixed"` on `Voice`, `Engine` and `NornsSoftcut`, and `--quirks` on both OSC servers. `"fixed"` corrects three softcut-lib defects: recording is polarity-inverted, `reset()` leaves a 0.1 s fade time rather than the 0.01 s it sets, and a raised pre-fade curve applies only while the rec curve is also raised. The default stays `"upstream"`, which is sample-exact with norns. It is a constructor argument rather than a build option, so one wheel serves both. The semantics match softcut-rs `Quirks`, so its golden tests can check both modes.
 
+- Crossfade curves on `Voice`: `rec_fade_shape`, `pre_fade_shape` (`"linear"`, `"sine"`, `"raised"`), `rec_delay_ratio` and `pre_window_ratio`. softcut-lib implements them, but its `Voice` did not expose them. Both ratios are clamped to [0, 1]: upstream indexes its 1001-point tables with the unclamped product, so a ratio above 1 wrote past them, and a negative or NaN ratio was undefined behaviour.
+
+- `Voice.heads`: both crossfading heads as `HeadState(position, fade, gain, active)`, saved once per block like `saved_position`, so a running engine can be inspected from Python.
+
 ### Fixed
 
 - **`rec` and `rec_once` read `True` after a `rec_once` pass had ended**, and `rec_once` read `True` after `rec = False` had cancelled it. softcut-lib clears both flags on the audio thread; the getters returned the last value set. softcut-lib now publishes both flags once per block and on each change, and the getters read them unless a set is still queued.

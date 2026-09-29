@@ -54,6 +54,10 @@ namespace softcut {
 
         phase_t getActivePhase();
         rate_t getRate();
+        // per-subhead state, for visualizing crossfades (audio thread only)
+        phase_t getHeadPhase(int i) { return head[i].phase(); }
+        float getHeadFade(int i) { return head[i].fade(); }
+        int getActiveHead() { return active; }
     protected:
         friend class SubHead;
 

@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import array
 import contextlib
+import math
 import time
 import warnings
 from collections.abc import Iterator, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 from softcut._core import Voice, _Engine
 from softcut._core import list_devices as _list_devices
@@ -66,6 +67,7 @@ def _samples(buffer: Any) -> int:
 
 __all__ = [
     "Voice",
+    "HeadState",
     "Engine",
     "Softcut",
     "next_power_of_two",
@@ -169,6 +171,23 @@ def _voice_repr(self: Voice) -> str:
     )
 
 
+class HeadState(NamedTuple):
+    """One of a voice's two crossfading heads, from :attr:`Voice.heads`."""
+
+    position: float  #: seconds
+    fade: float  #: crossfade progress: 0 silent, 1 fully in
+    gain: float  #: output gain, sin(fade * pi / 2)
+    active: bool  #: playing through or fading in; the other fades out or is stopped
+
+
+def _voice_heads(self: Voice) -> tuple[HeadState, HeadState]:
+    p0, f0, p1, f1, active = self._heads
+    return tuple(  # type: ignore[return-value]
+        HeadState(p, f, math.sin(f * math.pi / 2), active == i)
+        for i, (p, f) in enumerate(((p0, f0), (p1, f1)))
+    )
+
+
 _voice_process_native = Voice.process
 
 
@@ -202,6 +221,16 @@ setattr(
 setattr(Voice, "record", _voice_record)
 setattr(Voice, "record_for", _voice_record_for)
 setattr(Voice, "__repr__", _voice_repr)
+setattr(
+    Voice,
+    "heads",
+    property(
+        _voice_heads,
+        doc="Both heads as of the last processed block. During a crossfade one "
+        "fades out while the other fades in; otherwise one plays and the other "
+        "is stopped at gain 0.",
+    ),
+)
 
 
 # --- Engine facade -------------------------------------------------------

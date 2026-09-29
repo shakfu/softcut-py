@@ -2,7 +2,7 @@
 
 ```python
 import softcut
-from softcut import Voice, Engine, next_power_of_two, list_devices
+from softcut import Voice, Engine, HeadState, next_power_of_two, list_devices
 ```
 
 ## Voice
@@ -23,7 +23,7 @@ A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are 
 | `fade_time` after construction or `reset()` | 0.1 s | 0.01 s |
 | Raised pre-fade curve | applied only while the rec curve is also raised | applied as set |
 
-`"upstream"` matches softcut-lib, and so norns, sample for sample. The 1.2 is the gain of softcut's record soft clipper, below its knee. The fade curve shapes are not exposed yet, so the third row does not affect this API.
+`"upstream"` matches softcut-lib, and so norns, sample for sample. The 1.2 is the gain of softcut's record soft clipper, below its knee. The third row matters only when setting `pre_fade_shape = "raised"` while `rec_fade_shape` is something else.
 
 ### Buffer
 
@@ -67,7 +67,17 @@ A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are 
 | `phase_quant` | Quantization grid for `quant_phase`, in seconds. |
 | `phase_offset` | Offset applied to the reported phase, in seconds. |
 
-### Filters
+### Crossfade curves
+
+A crossfade blends new input into the buffer across its length. Setting a curve takes effect at the next crossfade.
+
+| Attribute | Description |
+| --- | --- |
+| `rec_fade_shape` | Curve that fades new input in: `"linear"`, `"sine"` or `"raised"` (default). |
+| `pre_fade_shape` | Curve that keeps existing content: `"linear"` (default), `"sine"` or `"raised"`. |
+| `rec_delay_ratio` | Fraction of a crossfade before new input starts fading in. Default 1/128; clamped to [0, 1]. |
+| `pre_window_ratio` | Fraction of a crossfade over which existing content is kept. Default 1/8; clamped to [0, 1]. |
+
 
 The voice has a state-variable filter on the record path (`pre_filter_*`) and one on the output (`post_filter_*`). Each has a cutoff `fc`, reciprocal-Q `rq`, a `dry` mix, and per-mode mix levels.
 
@@ -99,6 +109,7 @@ These are read by an `Engine`; a standalone `Voice.process()` ignores them.
 | `position` | Current head position in seconds (audio-thread view). |
 | `saved_position` | Head position updated once per block; safe to read from any thread. |
 | `quant_phase` | Quantized phase, in units of `phase_quant`. |
+| `heads` | Both crossfading heads as `HeadState(position, fade, gain, active)`, updated once per block; safe to read from any thread. `gain` is `sin(fade * pi / 2)`. During a crossfade the `active` head fades in while the other fades out. |
 
 ### Methods
 

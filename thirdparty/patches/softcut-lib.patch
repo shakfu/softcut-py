@@ -4,7 +4,7 @@
 # apply from a fresh upstream checkout with:  git apply -p1 softcut-lib.patch
 #
 diff --git a/softcut-lib/include/softcut/FadeCurves.h b/softcut-lib/include/softcut/FadeCurves.h
-index 8cceaaf..49a3836 100644
+index 8cceaaf..571170f 100644
 --- a/softcut-lib/include/softcut/FadeCurves.h
 +++ b/softcut-lib/include/softcut/FadeCurves.h
 @@ -15,8 +15,9 @@ namespace softcut {
@@ -19,10 +19,22 @@ index 8cceaaf..49a3836 100644
           void setRecDelayRatio(float x);
           void setPreWindowRatio(float x);
           void setMinRecDelayFrames(unsigned int x);
-@@ -38,16 +39,22 @@ namespace softcut {
-         // xfade curve buffers
-         static constexpr unsigned int fadeBufSize = 1001;
+@@ -29,25 +30,31 @@ namespace softcut {
  
+          float getPreFadeValue(float x);
+ 
++        // xfade curve buffers
++        static constexpr unsigned int fadeBufSize = 1001;
++
+     private:
+          void calcPreFade();
+          void calcRecFade();
+ 
+     private:
+ 
+-        // xfade curve buffers
+-        static constexpr unsigned int fadeBufSize = 1001;
+-
 -        // record delay and pre window in fade, as proportion of fade time
 -         float recDelayRatio;
 -         float preWindowRatio;
@@ -50,10 +62,21 @@ index 8cceaaf..49a3836 100644
  }
  
 diff --git a/softcut-lib/include/softcut/ReadWriteHead.h b/softcut-lib/include/softcut/ReadWriteHead.h
-index dcedfe7..8b30510 100644
+index dcedfe7..c38b279 100644
 --- a/softcut-lib/include/softcut/ReadWriteHead.h
 +++ b/softcut-lib/include/softcut/ReadWriteHead.h
-@@ -71,24 +71,29 @@ namespace softcut {
+@@ -54,6 +54,10 @@ namespace softcut {
+ 
+         phase_t getActivePhase();
+         rate_t getRate();
++        // per-subhead state, for visualizing crossfades (audio thread only)
++        phase_t getHeadPhase(int i) { return head[i].phase(); }
++        float getHeadFade(int i) { return head[i].fade(); }
++        int getActiveHead() { return active; }
+     protected:
+         friend class SubHead;
+ 
+@@ -71,24 +75,29 @@ namespace softcut {
      private:
          SubHead head[2];
  
@@ -250,7 +273,7 @@ index ff7fe2f..c21d5ba 100644
 -
  #endif //Softcut_TESTBUFFERS_H
 diff --git a/softcut-lib/include/softcut/Voice.h b/softcut-lib/include/softcut/Voice.h
-index 723691d..2c4d6b7 100644
+index 723691d..a115488 100644
 --- a/softcut-lib/include/softcut/Voice.h
 +++ b/softcut-lib/include/softcut/Voice.h
 @@ -16,7 +16,9 @@
@@ -264,7 +287,23 @@ index 723691d..2c4d6b7 100644
  
          void init(FadeCurves *fc);
  
-@@ -95,6 +97,12 @@ namespace softcut {
+@@ -74,6 +76,15 @@ namespace softcut {
+ 
+         void setPostFilterDry(float);
+ 
++        // crossfade curves; see FadeCurves
++        void setRecFadeShape(FadeCurves::Shape shape);
++
++        void setPreFadeShape(FadeCurves::Shape shape);
++
++        void setRecDelayRatio(float x);
++
++        void setPreWindowRatio(float x);
++
+         void cutToPos(float sec);
+ 
+         // process a single channel
+@@ -95,6 +106,20 @@ namespace softcut {
  
          bool getRecFlag();
  
@@ -274,19 +313,29 @@ index 723691d..2c4d6b7 100644
 +
 +        bool getSavedRecOnceFlag();
 +
++        // subhead i's position (seconds) and fade, and which subhead is
++        // active, as of the last block; use these from non-audio threads
++        float getSavedHeadPosition(int i);
++
++        float getSavedHeadFade(int i);
++
++        int getSavedActiveHead();
++
  	float getActivePosition();
  
  	// use this from non-audio threads
-@@ -110,6 +118,8 @@ namespace softcut {
+@@ -110,6 +135,10 @@ namespace softcut {
  
          void updateQuantPhase();
  
 +        void publishFlags();
 +
++        void publishHeads();
++
      private:
          float *buf;
          int bufFrames;
-@@ -138,20 +148,34 @@ namespace softcut {
+@@ -138,20 +167,37 @@ namespace softcut {
          float svfPreFcMod = 1.0;
          float svfPreDryLevel = 1.0;
          float svfPostDryLevel = 1.0;
@@ -316,6 +365,9 @@ index 723691d..2c4d6b7 100644
 +        std::atomic<phase_t> quantPhase{0};
 +        std::atomic<bool> savedRecFlag{false};
 +        std::atomic<bool> savedRecOnceFlag{false};
++        std::atomic<phase_t> savedHeadPhase[2] = {{0}, {0}};
++        std::atomic<float> savedHeadFade[2] = {{0.f}, {0.f}};
++        std::atomic<int> savedActiveHead{0};
  
      private:
  
@@ -326,20 +378,42 @@ index 723691d..2c4d6b7 100644
      };
  }
 diff --git a/softcut-lib/src/FadeCurves.cpp b/softcut-lib/src/FadeCurves.cpp
-index 30bf92d..f33dc8e 100644
+index 30bf92d..a20a6ef 100644
 --- a/softcut-lib/src/FadeCurves.cpp
 +++ b/softcut-lib/src/FadeCurves.cpp
-@@ -15,7 +15,8 @@ using namespace softcut;
+@@ -15,7 +15,19 @@ using namespace softcut;
  
  static constexpr float fpi = 3.1415926535898f;
  
 -void FadeCurves::init() {
++// Table points for a ratio of the fade, clamped to [0, max]. Upstream casts the
++// unclamped product: a ratio above 1 overruns the table, and a negative or NaN
++// ratio is undefined behaviour.
++static unsigned int tableFrames(float ratio, unsigned int max) {
++    const float x = ratio * FadeCurves::fadeBufSize;
++    if (!(x > 0.f)) {
++        return 0;
++    }
++    return x >= static_cast<float>(max) ? max : static_cast<unsigned int>(x);
++}
++
 +void FadeCurves::init(bool fix) {
 +    fixQuirks = fix;
      setPreShape(FadeCurves::Shape::Linear);
      setRecShape(FadeCurves::Shape::Raised);
      setMinPreWindowFrames(0);
-@@ -66,7 +67,7 @@ void FadeCurves::calcRecFade() {
+@@ -29,8 +41,8 @@ void FadeCurves::calcRecFade() {
+     unsigned int n = fadeBufSize - 1;
+     // build rec-fade curve
+     // this will be scaled by base rec level
+-    unsigned int ndr = std::max(recDelayMinFrames,
+-                                static_cast<unsigned int>(recDelayRatio * fadeBufSize));
++    unsigned int ndr = std::min(n, std::max(recDelayMinFrames,
++                                            tableFrames(recDelayRatio, n)));
+     unsigned int nr = n - ndr;
+ 
+     unsigned int i = 0;
+@@ -66,7 +78,7 @@ void FadeCurves::calcRecFade() {
              buf[i++] = y;
          }
          while (i < n) {
@@ -348,7 +422,18 @@ index 30bf92d..f33dc8e 100644
              buf[i++] = y;
              x += phi;
          }
-@@ -100,7 +101,7 @@ void FadeCurves::calcPreFade() {
+@@ -83,8 +95,8 @@ void FadeCurves::calcPreFade() {
+     float buf[fadeBufSize];
+     // build pre-fade curve
+     // this will be scaled and added to the base pre value (mapping [0, 1] -> [pre, 1])
+-    unsigned int nwp = std::max(preWindowMinFrames,
+-                                static_cast<unsigned int>(preWindowRatio * fadeBufSize));
++    unsigned int nwp = std::min(fadeBufSize, std::max(preWindowMinFrames,
++                                                      tableFrames(preWindowRatio, fadeBufSize)));
+ 
+     unsigned int i = 0;
+     float x = 0.f;
+@@ -100,7 +112,7 @@ void FadeCurves::calcPreFade() {
              buf[i++] = 1.f - x;
              x += phi;
          }
@@ -384,7 +469,7 @@ index c34c069..f4bf806 100644
  float Svf::getNextSample(float x) {
      update(x);
 diff --git a/softcut-lib/src/Voice.cpp b/softcut-lib/src/Voice.cpp
-index 1942f71..83d08de 100644
+index 1942f71..eb8da6e 100644
 --- a/softcut-lib/src/Voice.cpp
 +++ b/softcut-lib/src/Voice.cpp
 @@ -9,17 +9,18 @@
@@ -408,7 +493,7 @@ index 1942f71..83d08de 100644
  
      svfPre.reset();
      svfPre.setLpMix(1.0);
-@@ -50,10 +51,26 @@ void Voice::reset() {
+@@ -50,10 +51,27 @@ void Voice::reset() {
  
      sch.setRecOffsetSamples(-8);
  
@@ -432,18 +517,20 @@ index 1942f71..83d08de 100644
 +        setFadeTime(0.01);
 +    }
 +    publishFlags();
++    publishHeads();
  }
  
  void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
-@@ -104,6 +121,7 @@ void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
+@@ -104,6 +122,8 @@ void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
              sch.setRecOnceFlag(false);
          }
      }
 +    publishFlags();
++    publishHeads();
  }
  
  void Voice::setSampleRate(float hz) {
-@@ -162,6 +180,7 @@ void Voice::setRecFlag(bool val) {
+@@ -162,6 +182,7 @@ void Voice::setRecFlag(bool val) {
              sch.setRecOnceFlag(false);
  	}
      }
@@ -451,7 +538,7 @@ index 1942f71..83d08de 100644
  }
  
  void Voice::setPlayFlag(bool val) {
-@@ -255,6 +274,7 @@ void Voice::setRecOnceFlag(bool val) {
+@@ -255,6 +276,7 @@ void Voice::setRecOnceFlag(bool val) {
      if (val) {
          setRecFlag(true);
      }
@@ -459,7 +546,7 @@ index 1942f71..83d08de 100644
  }
  
  void Voice::setBuffer(float *b, unsigned int nf) {
-@@ -305,6 +325,19 @@ bool Voice::getRecFlag() {
+@@ -305,6 +327,55 @@ bool Voice::getRecFlag() {
      return recFlag;
  }
  
@@ -469,6 +556,42 @@ index 1942f71..83d08de 100644
 +
 +bool Voice::getSavedRecOnceFlag() {
 +    return savedRecOnceFlag.load(std::memory_order_relaxed);
++}
++
++float Voice::getSavedHeadPosition(int i) {
++    return static_cast<float>(savedHeadPhase[i].load(std::memory_order_relaxed) / sampleRate);
++}
++
++float Voice::getSavedHeadFade(int i) {
++    return savedHeadFade[i].load(std::memory_order_relaxed);
++}
++
++int Voice::getSavedActiveHead() {
++    return savedActiveHead.load(std::memory_order_relaxed);
++}
++
++void Voice::publishHeads() {
++    for (int i = 0; i < 2; ++i) {
++        savedHeadPhase[i].store(sch.getHeadPhase(i), std::memory_order_relaxed);
++        savedHeadFade[i].store(sch.getHeadFade(i), std::memory_order_relaxed);
++    }
++    savedActiveHead.store(sch.getActiveHead(), std::memory_order_relaxed);
++}
++
++void Voice::setRecFadeShape(FadeCurves::Shape shape) {
++    fadeCurves.setRecShape(shape);
++}
++
++void Voice::setPreFadeShape(FadeCurves::Shape shape) {
++    fadeCurves.setPreShape(shape);
++}
++
++void Voice::setRecDelayRatio(float x) {
++    fadeCurves.setRecDelayRatio(x);
++}
++
++void Voice::setPreWindowRatio(float x) {
++    fadeCurves.setPreWindowRatio(x);
 +}
 +
 +void Voice::publishFlags() {

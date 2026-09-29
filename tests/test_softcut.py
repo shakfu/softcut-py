@@ -427,6 +427,125 @@ def test_engine_passes_quirks_to_every_voice():
     assert all(v.quirks == "fixed" for v in eng)
 
 
+# --- Voice: crossfade curves and heads --------------------------------------
+
+
+def test_fade_curve_defaults_roundtrip_and_reset():
+    v = Voice(SR)
+    assert (v.rec_fade_shape, v.pre_fade_shape) == ("raised", "linear")
+    assert v.rec_delay_ratio == pytest.approx(1 / 128)
+    assert v.pre_window_ratio == pytest.approx(1 / 8)
+    v.configure(
+        rec_fade_shape="sine",
+        pre_fade_shape="raised",
+        rec_delay_ratio=0.25,
+        pre_window_ratio=0.5,
+    )
+    assert (v.rec_fade_shape, v.pre_fade_shape) == ("sine", "raised")
+    assert (v.rec_delay_ratio, v.pre_window_ratio) == (0.25, 0.5)
+    v.reset()
+    assert (v.rec_fade_shape, v.pre_fade_shape) == ("raised", "linear")
+    assert v.pre_window_ratio == pytest.approx(1 / 8)
+
+
+def test_fade_shape_rejects_unknown_names():
+    v = Voice(SR)
+    with pytest.raises(ValueError):
+        v.rec_fade_shape = "cosine"
+    assert v.rec_fade_shape == "raised"
+
+
+def _overdub_across_cuts(v: Voice, **curves: object) -> np.ndarray:
+    """Buffer after recording over existing content through two crossfades."""
+    buf = np.full(65536, 0.5, dtype=np.float32)
+    v.buffer = buf
+    v.configure(loop_region=(0, 1), rec_level=1.0, pre_level=0.0, **curves)
+    v.fade_time = 0.02
+    v.rec = v.play = True
+    v.cut_to(0.1)
+    v.process(np.full(9600, 0.25, dtype=np.float32))
+    v.cut_to(0.5)
+    v.process(np.full(9600, 0.25, dtype=np.float32))
+    return buf.copy()
+
+
+def test_fade_curves_change_what_a_crossfade_records():
+    base = _overdub_across_cuts(Voice(SR))
+    for curves in (
+        {"rec_fade_shape": "sine"},
+        {"pre_fade_shape": "sine"},
+        {"rec_delay_ratio": 0.5},
+        {"pre_window_ratio": 0.5},
+    ):
+        assert not np.array_equal(_overdub_across_cuts(Voice(SR), **curves), base), (
+            curves
+        )
+
+
+@pytest.mark.parametrize("ratio", [5.0, -1.0, float("nan")])
+def test_out_of_range_fade_ratios_are_clamped(ratio):
+    # Upstream indexes its 1001-point tables with the unclamped ratio.
+    out = _overdub_across_cuts(Voice(SR), rec_delay_ratio=ratio, pre_window_ratio=ratio)
+    assert np.isfinite(out).all()
+
+
+def test_upstream_quirks_ignore_a_raised_pre_curve_under_another_rec_curve():
+    # The rec shape is set first: upstream checks it when building the pre curve.
+    linear = {"rec_fade_shape": "linear"}
+    raised_pre = {"rec_fade_shape": "linear", "pre_fade_shape": "raised"}
+    np.testing.assert_array_equal(
+        _overdub_across_cuts(Voice(SR, quirks="upstream"), **raised_pre),
+        _overdub_across_cuts(Voice(SR, quirks="upstream"), **linear),
+    )
+    assert not np.array_equal(
+        _overdub_across_cuts(Voice(SR, quirks="fixed"), **raised_pre),
+        _overdub_across_cuts(Voice(SR, quirks="fixed"), **linear),
+    )
+
+
+def test_heads_follow_a_crossfade():
+    v, _ = make_voice()
+    v.fade_time = 0.02
+    v.play = True
+    v.process(np.zeros(512, dtype=np.float32))
+
+    def by_role():
+        a, b = v.heads
+        assert a.active != b.active
+        return (b, a) if a.active else (a, b)  # (fading out, fading in)
+
+    out, into = by_role()
+    assert (into.fade, into.gain, out.fade) == (1.0, 1.0, 0.0)
+
+    v.cut_to(0.5)
+    v.process(np.zeros(240, dtype=np.float32))  # a quarter of the 960-frame fade
+    out, into = by_role()
+    assert into.fade == pytest.approx(0.25, abs=0.01)
+    assert out.fade == pytest.approx(0.75, abs=0.01)
+    assert into.position == pytest.approx(0.5 + 240 / SR, abs=1e-4)
+    assert into.gain == pytest.approx(np.sin(into.fade * np.pi / 2))
+
+    v.process(np.zeros(960, dtype=np.float32))
+    out, into = by_role()
+    assert (into.fade, out.fade) == (1.0, 0.0)
+
+
+def test_heads_read_while_the_engine_runs():
+    import time
+
+    eng = Engine(voices=1, sample_rate=SR, mode="playback", null_device=True)
+    v = eng[0]
+    eng.allocate(seconds=1.0)
+    v.configure(loop_region=(0, 1))
+    v.play = True
+    v.cut_to(0.0)
+    with eng:
+        time.sleep(0.1)
+        heads = v.heads
+    assert sum(h.active for h in heads) == 1
+    assert max(h.position for h in heads) > 0.0
+
+
 def test_dropped_commands_starts_at_zero_and_is_read_only():
     """The overflow counter is the visible half of the queue's drop policy.
 

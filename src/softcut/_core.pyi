@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from typing import Any, TypeAlias
 from contextlib import AbstractContextManager
 
+from softcut import HeadState
+
 # Anything exposing a C-contiguous float32 buffer: an `array.array("f")`, a
 # `memoryview`, a numpy array. There is no static type for that -- the buffer
 # protocol only became expressible as `collections.abc.Buffer` in 3.12, and even
@@ -67,6 +69,12 @@ class Voice:
     post_filter_br: float
     post_filter_dry: float
 
+    # crossfade curves: "linear", "sine" or "raised"
+    rec_fade_shape: str
+    pre_fade_shape: str
+    rec_delay_ratio: float
+    pre_window_ratio: float
+
     # engine mix
     level: float
     pan: float
@@ -79,6 +87,10 @@ class Voice:
     def saved_position(self) -> float: ...
     @property
     def quant_phase(self) -> float: ...
+    @property
+    def _heads(self) -> tuple[float, float, float, float, int]: ...
+    @property
+    def heads(self) -> tuple[HeadState, HeadState]: ...
 
     # actions
     def process(self, input: Buffer, out: Buffer | None = None) -> Any: ...

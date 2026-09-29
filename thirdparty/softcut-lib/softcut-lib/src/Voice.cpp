@@ -71,6 +71,7 @@ void Voice::reset() {
         setFadeTime(0.01);
     }
     publishFlags();
+    publishHeads();
 }
 
 void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
@@ -122,6 +123,7 @@ void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
         }
     }
     publishFlags();
+    publishHeads();
 }
 
 void Voice::setSampleRate(float hz) {
@@ -331,6 +333,42 @@ bool Voice::getSavedRecFlag() {
 
 bool Voice::getSavedRecOnceFlag() {
     return savedRecOnceFlag.load(std::memory_order_relaxed);
+}
+
+float Voice::getSavedHeadPosition(int i) {
+    return static_cast<float>(savedHeadPhase[i].load(std::memory_order_relaxed) / sampleRate);
+}
+
+float Voice::getSavedHeadFade(int i) {
+    return savedHeadFade[i].load(std::memory_order_relaxed);
+}
+
+int Voice::getSavedActiveHead() {
+    return savedActiveHead.load(std::memory_order_relaxed);
+}
+
+void Voice::publishHeads() {
+    for (int i = 0; i < 2; ++i) {
+        savedHeadPhase[i].store(sch.getHeadPhase(i), std::memory_order_relaxed);
+        savedHeadFade[i].store(sch.getHeadFade(i), std::memory_order_relaxed);
+    }
+    savedActiveHead.store(sch.getActiveHead(), std::memory_order_relaxed);
+}
+
+void Voice::setRecFadeShape(FadeCurves::Shape shape) {
+    fadeCurves.setRecShape(shape);
+}
+
+void Voice::setPreFadeShape(FadeCurves::Shape shape) {
+    fadeCurves.setPreShape(shape);
+}
+
+void Voice::setRecDelayRatio(float x) {
+    fadeCurves.setRecDelayRatio(x);
+}
+
+void Voice::setPreWindowRatio(float x) {
+    fadeCurves.setPreWindowRatio(x);
 }
 
 void Voice::publishFlags() {

@@ -30,14 +30,14 @@ namespace softcut {
 
          float getPreFadeValue(float x);
 
+        // xfade curve buffers
+        static constexpr unsigned int fadeBufSize = 1001;
+
     private:
          void calcPreFade();
          void calcRecFade();
 
     private:
-
-        // xfade curve buffers
-        static constexpr unsigned int fadeBufSize = 1001;
 
         // record delay and pre window in fade, as proportion of fade time.
         // NB: these are default-initialized to the same values init() assigns,
