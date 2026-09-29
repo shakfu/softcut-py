@@ -36,6 +36,7 @@ inline uint32_t next_pow2(uint32_t n) {
 }
 
 struct Voice {
+    explicit Voice(bool fix_quirks) : sc(fix_quirks) {}
     softcut::Voice sc;
     // Engine-mix params, read and written only on the audio thread (mutated via
     // the command queue), so no atomics are needed.
@@ -48,7 +49,7 @@ struct Voice {
 class Engine {
 public:
     Engine(int n_voices, float sample_rate, int block_size, uint32_t buffer_frames,
-           bool duplex, int out_channels)
+           bool duplex, int out_channels, bool fix_quirks = false)
         : n_voices_(n_voices), sample_rate_(sample_rate), block_size_(block_size),
           buffer_frames_(next_pow2(buffer_frames)), duplex_(duplex),
           out_channels_(out_channels) {
@@ -58,7 +59,7 @@ public:
         for (auto &b : buffers_) b.assign(buffer_frames_, 0.0f);
         voices_.reserve(static_cast<size_t>(n_voices_));
         for (int i = 0; i < n_voices_; ++i) {
-            auto v = std::make_unique<Voice>();  // Voice is non-movable (atomic in sc)
+            auto v = std::make_unique<Voice>(fix_quirks);  // non-movable (atomic in sc)
             v->sc.setSampleRate(sample_rate_);
             v->sc.setBuffer(buffers_[0].data(), buffer_frames_);  // default: buf 1
             voices_.push_back(std::move(v));

@@ -8,10 +8,22 @@ from softcut import Voice, Engine, next_power_of_two, list_devices
 ## Voice
 
 ```python
-Voice(sample_rate: float = 48000.0)
+Voice(sample_rate: float = 48000.0, quirks: str = "upstream")
 ```
 
-A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are plain attributes; reading one returns the last value set.
+A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are plain attributes; reading one returns the last value set. `rec` and `rec_once` are the exceptions: they report the DSP's state, which a finished `rec_once` pass changes.
+
+### Quirks
+
+`quirks` selects which softcut-lib defects the voice reproduces. It is read-only after construction, and `reset()` keeps it.
+
+| | `"upstream"` (default) | `"fixed"` |
+| --- | --- | --- |
+| Recorded polarity | inverted: DC input records at -1.2x | input polarity: +1.2x |
+| `fade_time` after construction or `reset()` | 0.1 s | 0.01 s |
+| Raised pre-fade curve | applied only while the rec curve is also raised | applied as set |
+
+`"upstream"` matches softcut-lib, and so norns, sample for sample. The 1.2 is the gain of softcut's record soft clipper, below its knee. The fade curve shapes are not exposed yet, so the third row does not affect this API.
 
 ### Buffer
 
@@ -28,7 +40,7 @@ A single softcut DSP voice over a caller-owned `float32` buffer. Parameters are 
 | `loop_start`, `loop_end` | Loop region bounds, in seconds. |
 | `loop_region` | `(start, end)` tuple; setting it also enables looping. |
 | `loop` | Loop flag (bool). |
-| `fade_time` | Crossfade time at loop/cut boundaries, in seconds. |
+| `fade_time` | Crossfade time at loop/cut boundaries, in seconds. Starts at 0.1 (see [Quirks](#quirks)). |
 
 ### Record and play
 
@@ -117,6 +129,7 @@ Engine(
     output_device: int = -1,     # index from list_devices(); -1 = default
     input_device: int = -1,
     null_device: bool = False,   # headless backend, for tests and CI
+    quirks: str = "upstream",    # passed to every Voice; see Quirks
 )
 ```
 

@@ -112,6 +112,7 @@ struct Voice {
     nb::object prev_buffer_ref_;
     size_t buffer_frames_ = 0;  // frames in buffer_ref; 0 until one is assigned
     float sample_rate = 48000.0f;
+    bool fixed_ = false;  // quirks == "fixed"; see softcut::Voice(bool)
 
     // Engine mix parameters (not softcut params): read by Engine's mixer.
     // level is a linear gain; pan is -1 (left) .. 0 (center) .. +1 (right).
@@ -179,35 +180,80 @@ struct Voice {
 
     // Apply a softcut DSP change now, or defer it to the audio thread if an
     // engine is running (so the audio thread never reads a half-written param).
-    void dsp_apply(std::function<void()> fn) {
+    // Returns false if the change was dropped (see queue_apply).
+    bool dsp_apply(std::function<void()> fn) {
         if (engine_running_ == nullptr || lifecycle_ == nullptr) {
             fn();  // no engine hosting us: nothing to race
-            return;
+            return true;
         }
         // The push stays inside the lock as well, so a command queued here can
         // never land after Engine::stop's final drain and strand itself.
         std::shared_lock<std::shared_mutex> lock(*lifecycle_);
         if (engine_running_->load(std::memory_order_acquire)) {
-            queue_apply(cmd_queue_, fn);
-            return;
+            return queue_apply(cmd_queue_, fn);
         }
         fn();  // no audio thread to race: apply directly
+        return true;
     }
 
     // Like dsp_apply, but posts to the native OSC receiver's dedicated queue.
     // Called only from the OSC receiver thread, so osc_queue_ has one producer.
-    void osc_apply(std::function<void()> fn) {
+    bool osc_apply(std::function<void()> fn) {
         if (engine_running_ == nullptr || lifecycle_ == nullptr ||
             osc_queue_ == nullptr) {
             fn();
-            return;
+            return true;
         }
         std::shared_lock<std::shared_mutex> lock(*lifecycle_);
         if (engine_running_->load(std::memory_order_acquire)) {
-            queue_apply(osc_queue_, fn);
-            return;
+            return queue_apply(osc_queue_, fn);
         }
         fn();
+        return true;
+    }
+
+    // rec and rec_once also change on the audio thread: a finished rec_once
+    // pass clears both. While a change to either is queued, the getters report
+    // the mirrors; otherwise they report what softcut-lib published.
+    std::atomic<int> flag_changes_pending_{0};
+
+    void flag_apply(std::function<void()> fn, bool from_osc) {
+        flag_changes_pending_.fetch_add(1, std::memory_order_relaxed);
+        if (!(from_osc ? osc_apply(fn) : dsp_apply(fn)))
+            flag_changes_pending_.fetch_sub(1, std::memory_order_release);
+    }
+
+    void flag_applied() {
+        flag_changes_pending_.fetch_sub(1, std::memory_order_release);
+    }
+
+    bool flags_pending() const {
+        return flag_changes_pending_.load(std::memory_order_acquire) > 0;
+    }
+
+    // Mirror softcut::Voice: rec off cancels rec_once, rec_once on sets rec.
+    void set_rec(bool x, bool from_osc) {
+        rec_.store(x, std::memory_order_relaxed);
+        if (!x) rec_once_.store(false, std::memory_order_relaxed);
+        Voice *p = this;
+        flag_apply([p, x] { p->v.setRecFlag(x); p->flag_applied(); }, from_osc);
+    }
+
+    void set_rec_once(bool x, bool from_osc) {
+        rec_once_.store(x, std::memory_order_relaxed);
+        if (x) rec_.store(true, std::memory_order_relaxed);
+        Voice *p = this;
+        flag_apply([p, x] { p->v.setRecOnceFlag(x); p->flag_applied(); }, from_osc);
+    }
+
+    bool rec() const {
+        return flags_pending() ? rec_.load(std::memory_order_relaxed)
+                               : const_cast<softcut::Voice &>(v).getSavedRecFlag();
+    }
+
+    bool rec_once() const {
+        return flags_pending() ? rec_once_.load(std::memory_order_relaxed)
+                               : const_cast<softcut::Voice &>(v).getSavedRecOnceFlag();
     }
 
     // Mirrors of write-only parameters, seeded with softcut::Voice::reset()
@@ -223,7 +269,7 @@ struct Voice {
     std::atomic<bool> rec_{false};
     std::atomic<bool> rec_once_{false};
     std::atomic<bool> play_{false};
-    std::atomic<float> fade_time_{0.01f};
+    std::atomic<float> fade_time_{0.1f};  // 0.01 with fixed quirks
     std::atomic<float> rec_level_{0.0f};
     std::atomic<float> pre_level_{0.0f};
     std::atomic<float> rec_offset_{-8.0f / 48000.0f};
@@ -265,7 +311,7 @@ struct Voice {
         rec_ = false;
         rec_once_ = false;
         play_ = false;
-        fade_time_ = 0.01f;
+        fade_time_ = fixed_ ? 0.01f : 0.1f;
         rec_level_ = 0.0f;
         pre_level_ = 0.0f;
         rec_offset_ = -8.0f / 48000.0f;
@@ -290,8 +336,9 @@ struct Voice {
         post_filter_dry_ = 1.0f;
     }
 
-    explicit Voice(float sr) : sample_rate(sr) {
+    Voice(float sr, bool fixed) : v(fixed), sample_rate(sr), fixed_(fixed) {
         v.setSampleRate(sr);
+        if (fixed) fade_time_ = 0.01f;
     }
 
     void set_sample_rate(float hz) {
@@ -849,9 +896,15 @@ private:
         } else {
             const BoolParam bp = bit->second;
             const bool val = raw != 0.0f;
-            (pv->*(bp.mirror)).store(val, std::memory_order_relaxed);
-            const auto setter = bp.setter;
-            pv->osc_apply([pv, setter, val] { (pv->v.*setter)(val); });
+            if (bp.mirror == &Voice::rec_) {
+                pv->set_rec(val, true);
+            } else if (bp.mirror == &Voice::rec_once_) {
+                pv->set_rec_once(val, true);
+            } else {
+                (pv->*(bp.mirror)).store(val, std::memory_order_relaxed);
+                const auto setter = bp.setter;
+                pv->osc_apply([pv, setter, val] { (pv->v.*setter)(val); });
+            }
             probe_stamp(val ? 1.0f : 0.0f);
         }
         return true;
@@ -1063,7 +1116,19 @@ NB_MODULE(_core, m) {
         "caller-owned audio buffer, with rate, loop, record/play and "
         "pre/post filtering. Buffers are numpy float32 arrays you own; assign "
         "the same array to several voices to share it.")
-        .def(nb::init<float>(), "sample_rate"_a = 48000.0f)
+        .def("__init__",
+            [](Voice *s, float sr, const std::string &quirks) {
+                if (quirks != "upstream" && quirks != "fixed")
+                    throw std::invalid_argument(
+                        "quirks must be 'upstream' or 'fixed' (got '" + quirks + "')");
+                new (s) Voice(sr, quirks == "fixed");
+            },
+            "sample_rate"_a = 48000.0f, "quirks"_a = "upstream")
+
+        .def_prop_ro("quirks",
+            [](Voice &s) { return s.fixed_ ? "fixed" : "upstream"; },
+            "'upstream' reproduces softcut-lib sample for sample; 'fixed' "
+            "records with the input's polarity and resets to a 0.01 s fade.")
 
         .def_prop_rw("sample_rate",
             [](Voice &s) { return s.sample_rate; },
@@ -1089,8 +1154,12 @@ NB_MODULE(_core, m) {
         // record / play
         .FPROP("rec_level", rec_level_, setRecLevel)
         .FPROP("pre_level", pre_level_, setPreLevel)
-        .BPROP("rec", rec_, setRecFlag)
-        .BPROP("rec_once", rec_once_, setRecOnceFlag)
+        .def_prop_rw("rec",
+            [](Voice &s) { return s.rec(); },
+            [](Voice &s, bool x) { s.set_rec(x, false); probe_stamp(x ? 1.0f : 0.0f); })
+        .def_prop_rw("rec_once",
+            [](Voice &s) { return s.rec_once(); },
+            [](Voice &s, bool x) { s.set_rec_once(x, false); probe_stamp(x ? 1.0f : 0.0f); })
         .BPROP("play", play_, setPlayFlag)
         .FPROP("rec_offset", rec_offset_, setRecOffset)
 
@@ -1166,7 +1235,7 @@ NB_MODULE(_core, m) {
             "Immediately stop both subheads.")
         .def("reset", [](Voice &s) {
                 Voice *p = &s;
-                s.dsp_apply([p] { p->v.reset(); });
+                s.flag_apply([p] { p->v.reset(); p->flag_applied(); }, false);
                 // The DSP reset happens on the audio thread when one is running;
                 // the mirrors are Python-side state, so they are restored here.
                 s.reset_params();

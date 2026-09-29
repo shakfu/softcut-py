@@ -20,6 +20,7 @@ Or from the command line:
 python -m softcut.osc                 # audio device + OSC server
 python -m softcut.osc --no-audio      # offline: buffer ops only, no device
 python -m softcut.osc --listen-port 9999 --reply-port 57120 --backend auto
+python -m softcut.osc --quirks fixed  # correct softcut-lib's defects (see API: Quirks)
 ```
 
 For background use (tests, embedding), `start()` runs the server on a background thread and returns immediately; `shutdown()` stops it. `SoftcutOSC` is also a context manager.

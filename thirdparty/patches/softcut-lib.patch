@@ -4,10 +4,22 @@
 # apply from a fresh upstream checkout with:  git apply -p1 softcut-lib.patch
 #
 diff --git a/softcut-lib/include/softcut/FadeCurves.h b/softcut-lib/include/softcut/FadeCurves.h
-index 8cceaaf..9cb492f 100644
+index 8cceaaf..49a3836 100644
 --- a/softcut-lib/include/softcut/FadeCurves.h
 +++ b/softcut-lib/include/softcut/FadeCurves.h
-@@ -38,16 +38,21 @@ namespace softcut {
+@@ -15,8 +15,9 @@ namespace softcut {
+     public:
+         typedef enum { Linear=0, Sine=1, Raised=2 } Shape;
+ 
+-        // initialize with defaults
+-        void init();
++        // initialize with defaults. fixQuirks corrects the raised rec curve's
++        // sign (upstream records polarity-inverted) and the pre-shape check.
++        void init(bool fixQuirks = false);
+          void setRecDelayRatio(float x);
+          void setPreWindowRatio(float x);
+          void setMinRecDelayFrames(unsigned int x);
+@@ -38,16 +39,22 @@ namespace softcut {
          // xfade curve buffers
          static constexpr unsigned int fadeBufSize = 1001;
  
@@ -33,6 +45,7 @@ index 8cceaaf..9cb492f 100644
 -         Shape preShape;
 +         Shape recShape = Raised;
 +         Shape preShape = Linear;
++         bool fixQuirks = false;
      };
  }
  
@@ -236,6 +249,114 @@ index ff7fe2f..c21d5ba 100644
  
 -
  #endif //Softcut_TESTBUFFERS_H
+diff --git a/softcut-lib/include/softcut/Voice.h b/softcut-lib/include/softcut/Voice.h
+index 723691d..2c4d6b7 100644
+--- a/softcut-lib/include/softcut/Voice.h
++++ b/softcut-lib/include/softcut/Voice.h
+@@ -16,7 +16,9 @@
+ namespace softcut {
+     class Voice {
+     public:
+-        Voice();
++        // fixQuirks corrects upstream defects: polarity-inverted recording,
++        // the 0.1 s fade time reset() leaves, and the raised pre-curve check.
++        explicit Voice(bool fixQuirks = false);
+ 
+         void init(FadeCurves *fc);
+ 
+@@ -95,6 +97,12 @@ namespace softcut {
+ 
+         bool getRecFlag();
+ 
++        // rec and rec-once state, updated per block and on each flag change;
++        // use these from non-audio threads
++        bool getSavedRecFlag();
++
++        bool getSavedRecOnceFlag();
++
+ 	float getActivePosition();
+ 
+ 	// use this from non-audio threads
+@@ -110,6 +118,8 @@ namespace softcut {
+ 
+         void updateQuantPhase();
+ 
++        void publishFlags();
++
+     private:
+         float *buf;
+         int bufFrames;
+@@ -138,20 +148,34 @@ namespace softcut {
+         float svfPreFcMod = 1.0;
+         float svfPreDryLevel = 1.0;
+         float svfPostDryLevel = 1.0;
++        // NB: like SubHead's, these members are default-initialized because
++        // softcut relies on zero-initialized static storage on embedded
++        // targets. reset() did not set them either, so on a host a
++        // heap-allocated Voice began with a garbage phaseQuant -- which
++        // updateQuantPhase() divides by, taking the quantizing branch instead
++        // of the phaseQuant == 0 one -- and with garbage in the two phase
++        // mirrors, which non-audio threads read before the first block is
++        // processed. Both reach a host as a nonsense quantized phase: the OSC
++        // phase poll reports it, and a value beyond float range aborts the
++        // send outright.
++        //
+         // phase quantization unit, should be in [0,1]
+-        phase_t phaseQuant;
++        phase_t phaseQuant = 0;
+         // phase offset in sec
+         float phaseOffset = 0;
+-	
++
+ 	//-- these stored phases are for access from non-audio threads,
+ 	// and are updated once per block:
+-	std::atomic<phase_t> rawPhase;
+-        std::atomic<phase_t> quantPhase;
++	std::atomic<phase_t> rawPhase{0};
++        std::atomic<phase_t> quantPhase{0};
++        std::atomic<bool> savedRecFlag{false};
++        std::atomic<bool> savedRecOnceFlag{false};
+ 
+     private:
+ 
+         bool playFlag;
+         bool recFlag;
++        bool fixQuirks = false;
+ 
+     };
+ }
+diff --git a/softcut-lib/src/FadeCurves.cpp b/softcut-lib/src/FadeCurves.cpp
+index 30bf92d..f33dc8e 100644
+--- a/softcut-lib/src/FadeCurves.cpp
++++ b/softcut-lib/src/FadeCurves.cpp
+@@ -15,7 +15,8 @@ using namespace softcut;
+ 
+ static constexpr float fpi = 3.1415926535898f;
+ 
+-void FadeCurves::init() {
++void FadeCurves::init(bool fix) {
++    fixQuirks = fix;
+     setPreShape(FadeCurves::Shape::Linear);
+     setRecShape(FadeCurves::Shape::Raised);
+     setMinPreWindowFrames(0);
+@@ -66,7 +67,7 @@ void FadeCurves::calcRecFade() {
+             buf[i++] = y;
+         }
+         while (i < n) {
+-            y = sinf(x) * -1.f;
++            y = sinf(x) * (fixQuirks ? 1.f : -1.f);
+             buf[i++] = y;
+             x += phi;
+         }
+@@ -100,7 +101,7 @@ void FadeCurves::calcPreFade() {
+             buf[i++] = 1.f - x;
+             x += phi;
+         }
+-    } else if (recShape == Raised) {
++    } else if ((fixQuirks ? preShape : recShape) == Raised) {
+         assert(preShape == Raised);
+         const float phi = fpi / ( static_cast<float>(nwp*2));
+         while (i < nwp) {
 diff --git a/softcut-lib/src/Svf.cpp b/softcut-lib/src/Svf.cpp
 index c34c069..f4bf806 100644
 --- a/softcut-lib/src/Svf.cpp
@@ -262,3 +383,99 @@ index c34c069..f4bf806 100644
  
  float Svf::getNextSample(float x) {
      update(x);
+diff --git a/softcut-lib/src/Voice.cpp b/softcut-lib/src/Voice.cpp
+index 1942f71..83d08de 100644
+--- a/softcut-lib/src/Voice.cpp
++++ b/softcut-lib/src/Voice.cpp
+@@ -9,17 +9,18 @@
+ 
+ using namespace softcut;
+ 
+-Voice::Voice() :
++Voice::Voice(bool fix) :
+ rateRamp(48000, 0.1),
+ preRamp(48000, 0.1),
+ recRamp(48000, 0.1)
+ {
++    fixQuirks = fix;
+     svfPreFcBase = 16000;
+     reset();
+ }
+ 
+ void Voice::reset() {
+-    fadeCurves.init();
++    fadeCurves.init(fixQuirks);
+ 
+     svfPre.reset();
+     svfPre.setLpMix(1.0);
+@@ -50,10 +51,26 @@ void Voice::reset() {
+ 
+     sch.setRecOffsetSamples(-8);
+ 
++    // Restore the phase state too, so a reset voice reports where it now is
++    // rather than where it was, and so the defaults the host advertises for
++    // these two are the ones reset() actually establishes. Assigned rather than
++    // set through setPhaseOffset(), which scales by sampleRate -- not yet set
++    // when the constructor calls reset(), and a garbage sampleRate of inf or
++    // NaN would survive the multiply by zero.
++    phaseQuant = 0;
++    phaseOffset = 0;
++    rawPhase.store(0, std::memory_order_relaxed);
++    quantPhase.store(0, std::memory_order_relaxed);
++
+     recFlag = false;
+     playFlag = false;
+ 
+     sch.init(&fadeCurves);
++    // sch.init() sets 0.1 s, overriding the setFadeTime(0.01) above
++    if (fixQuirks) {
++        setFadeTime(0.01);
++    }
++    publishFlags();
+ }
+ 
+ void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
+@@ -104,6 +121,7 @@ void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
+             sch.setRecOnceFlag(false);
+         }
+     }
++    publishFlags();
+ }
+ 
+ void Voice::setSampleRate(float hz) {
+@@ -162,6 +180,7 @@ void Voice::setRecFlag(bool val) {
+             sch.setRecOnceFlag(false);
+ 	}
+     }
++    publishFlags();
+ }
+ 
+ void Voice::setPlayFlag(bool val) {
+@@ -255,6 +274,7 @@ void Voice::setRecOnceFlag(bool val) {
+     if (val) {
+         setRecFlag(true);
+     }
++    publishFlags();
+ }
+ 
+ void Voice::setBuffer(float *b, unsigned int nf) {
+@@ -305,6 +325,19 @@ bool Voice::getRecFlag() {
+     return recFlag;
+ }
+ 
++bool Voice::getSavedRecFlag() {
++    return savedRecFlag.load(std::memory_order_relaxed);
++}
++
++bool Voice::getSavedRecOnceFlag() {
++    return savedRecOnceFlag.load(std::memory_order_relaxed);
++}
++
++void Voice::publishFlags() {
++    savedRecFlag.store(recFlag, std::memory_order_relaxed);
++    savedRecOnceFlag.store(sch.getRecOnceActive(), std::memory_order_relaxed);
++}
++
+ float Voice::getActivePosition() {
+     return static_cast<float>(sch.getActivePhase() / sampleRate);
+ }

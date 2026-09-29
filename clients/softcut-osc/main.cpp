@@ -48,6 +48,7 @@ struct Options {
     bool null_backend = false;          // headless (no hardware) for tests/CI
     bool no_audio = false;              // do not open a device at all
     bool list_devices = false;
+    bool fix_quirks = false;            // --quirks fixed
 };
 
 int parse_int(const char *s) { return static_cast<int>(std::strtol(s, nullptr, 10)); }
@@ -72,6 +73,8 @@ void usage(const char *prog) {
         "  --duplex            capture mic input (default playback only)\n"
         "  --null              run headless on miniaudio's null backend\n"
         "  --no-audio          do not open an audio device at all\n"
+        "  --quirks MODE       upstream (default: match softcut-lib and norns)\n"
+        "                      or fixed (correct its defects)\n"
         "  -h, --help          this message\n", prog);
 }
 
@@ -98,6 +101,14 @@ bool parse_args(int argc, char **argv, Options &o) {
         else if (a == "--duplex") o.duplex = true;
         else if (a == "--null") o.null_backend = true;
         else if (a == "--no-audio") o.no_audio = true;
+        else if (a == "--quirks") {
+            std::string q = need("--quirks");
+            if (q != "upstream" && q != "fixed") {
+                std::fprintf(stderr, "--quirks must be upstream or fixed\n");
+                std::exit(2);
+            }
+            o.fix_quirks = q == "fixed";
+        }
         else if (a == "-h" || a == "--help") { usage(argv[0]); return false; }
         else { std::fprintf(stderr, "unknown option: %s\n", a.c_str()); usage(argv[0]); std::exit(2); }
     }
@@ -120,7 +131,7 @@ int main(int argc, char **argv) {
 
     try {
         scosc::Engine engine(o.voices, o.sample_rate, o.block_size, o.buffer_frames,
-                             o.duplex, o.out_channels);
+                             o.duplex, o.out_channels, o.fix_quirks);
         const long crossfade_frames =
             std::lround(o.crossfade_ms / 1000.0 * o.sample_rate);
         scosc::OscServer server(engine, o.listen_host, o.listen_port,

@@ -110,6 +110,7 @@ class NornsSoftcut:
         buffer_frames: int = _DEFAULT_BUFFER_FRAMES,
         mode: str = "duplex",
         null_device: bool = False,
+        quirks: str = "upstream",
     ) -> None:
         self.sample_rate = float(sample_rate)
         self._n = int(voices)
@@ -118,6 +119,7 @@ class NornsSoftcut:
             sample_rate=sample_rate,
             mode=mode,
             null_device=null_device,
+            quirks=quirks,
         )
         n = next_power_of_two(int(buffer_frames))
         self._buf = {b: array.array("f", bytes(4 * n)) for b in _BUFFERS}

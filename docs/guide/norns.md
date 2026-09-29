@@ -35,6 +35,8 @@ host = NornsSoftcut(sample_rate=48000.0, buffer_frames=2**16, mode="playback")
 host.rate(1, 0.5)
 ```
 
+`NornsSoftcut(quirks="fixed")` corrects softcut-lib's defects; the default, `"upstream"`, sounds as norns does. See [Quirks](../api.md#quirks).
+
 ## Parameters
 
 Each of these is `softcut.<name>(voice, value)`, with `voice` in 1-6:

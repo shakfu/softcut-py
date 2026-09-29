@@ -16,7 +16,11 @@ Buffer: TypeAlias = Any
 class Voice:
     """A single softcut DSP voice over a caller-owned float32 buffer."""
 
-    def __init__(self, sample_rate: float = 48000.0) -> None: ...
+    def __init__(
+        self, sample_rate: float = 48000.0, quirks: str = "upstream"
+    ) -> None: ...
+    @property
+    def quirks(self) -> str: ...
 
     sample_rate: float
     buffer: Buffer

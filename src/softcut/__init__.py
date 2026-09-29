@@ -222,7 +222,8 @@ class Engine(Sequence[Voice]):
     ``null_device=True`` runs the same callback on miniaudio's null backend --
     silence in, output discarded, no hardware -- for tests and CI.
     Voices mix to stereo via their ``level``/``pan``; ``feedback()`` routes one
-    voice's output into another's input.
+    voice's output into another's input. ``quirks`` is passed to every
+    :class:`Voice`.
     """
 
     def __init__(
@@ -235,6 +236,7 @@ class Engine(Sequence[Voice]):
         output_device: int = -1,
         input_device: int = -1,
         null_device: bool = False,
+        quirks: str = "upstream",
     ) -> None:
         if voices < 1:
             raise ValueError("voices must be >= 1")
@@ -243,7 +245,9 @@ class Engine(Sequence[Voice]):
         self._sample_rate = float(sample_rate)
         self._mode = mode
         self._block_size = int(block_size)
-        self._voices: list[Voice] = [Voice(self._sample_rate) for _ in range(voices)]
+        self._voices: list[Voice] = [
+            Voice(self._sample_rate, quirks=quirks) for _ in range(voices)
+        ]
         self._core = _Engine(
             self._voices,
             self._sample_rate,

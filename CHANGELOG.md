@@ -10,7 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `Engine(null_device=True)` opens miniaudio's null backend: the callback runs and is paced in real time, input is silence, output is discarded. The live-device tests run on it now instead of being skipped without hardware, so `make test` covers the audio thread, the command queue and the start/stop lifecycle. One smoke test still needs real hardware and stays behind `SOFTCUT_TEST_AUDIO=1`.
 
+- `quirks="upstream" | "fixed"` on `Voice`, `Engine` and `NornsSoftcut`, and `--quirks` on both OSC servers. `"fixed"` corrects three softcut-lib defects: recording is polarity-inverted, `reset()` leaves a 0.1 s fade time rather than the 0.01 s it sets, and a raised pre-fade curve applies only while the rec curve is also raised. The default stays `"upstream"`, which is sample-exact with norns. It is a constructor argument rather than a build option, so one wheel serves both. The semantics match softcut-rs `Quirks`, so its golden tests can check both modes.
+
 ### Fixed
+
+- **`rec` and `rec_once` read `True` after a `rec_once` pass had ended**, and `rec_once` read `True` after `rec = False` had cancelled it. softcut-lib clears both flags on the audio thread; the getters returned the last value set. softcut-lib now publishes both flags once per block and on each change, and the getters read them unless a set is still queued.
+
+- **`fade_time` read 0.01 on a new or reset voice, which crossfades over 0.1 s.** `Voice::reset()` sets 0.01, then `ReadWriteHead::init()` sets 0.1. The read-back now reports 0.1 under `"upstream"`, and the TouchOSC fade faders open there.
 
 - **A DSP setter could still be applied on the calling thread while the audio callback was live.** `Engine.start()` raised its running flag only after `ma_device_start()` returned, and `stop()` lowered it before `ma_device_stop()`, so across both transitions a setter read "not running" and took the direct path into softcut state the callback was reading. The flag now goes up before the device starts and down only after it has stopped.
 
@@ -29,6 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`write_wav()` accepted metadata it could not honour**, writing a malformed or silently truncated file. A flat buffer whose length did not divide by `channels` lost the partial frame; a 3-D array was contiguous, so it was written as mono; a `float64` array (what `np.sin()` returns) was reinterpreted as `float32` noise at half the length. It now rejects a non-`float32` buffer, anything but 1-D or 2-D, `channels < 1`, a `channels` that contradicts a 2-D shape, and a length that does not divide into whole frames -- before creating the parent directory or opening the file.
 
 ### Changed
+
+- `rec` can now change without a set: it reads `False` once a `rec_once` pass ends.
+
+- `thirdparty/patches/softcut-lib.patch` is regenerated against upstream `14241f2`. It had omitted the vendored `Voice.h`/`Voice.cpp` changes.
 
 - CI builds and smoke-tests the standalone OSC server (`make test-standalone`). It shares the DSP, mixer and device code with the extension but none of its build, so no other leg compiled it.
 

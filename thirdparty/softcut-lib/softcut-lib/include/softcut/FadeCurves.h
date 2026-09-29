@@ -15,8 +15,9 @@ namespace softcut {
     public:
         typedef enum { Linear=0, Sine=1, Raised=2 } Shape;
 
-        // initialize with defaults
-        void init();
+        // initialize with defaults. fixQuirks corrects the raised rec curve's
+        // sign (upstream records polarity-inverted) and the pre-shape check.
+        void init(bool fixQuirks = false);
          void setRecDelayRatio(float x);
          void setPreWindowRatio(float x);
          void setMinRecDelayFrames(unsigned int x);
@@ -53,6 +54,7 @@ namespace softcut {
          float preFadeBuf[fadeBufSize];
          Shape recShape = Raised;
          Shape preShape = Linear;
+         bool fixQuirks = false;
     };
 }
 

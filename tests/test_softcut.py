@@ -266,10 +266,165 @@ def test_reset_restores_the_parameter_read_backs():
     assert v.rate == pytest.approx(1.0)
     assert v.post_filter_dry == pytest.approx(1.0)
     assert v.pre_filter_fc == pytest.approx(16000.0)
-    assert v.fade_time == pytest.approx(0.01)
+    assert v.fade_time == pytest.approx(0.1)  # upstream: sch.init() overrides 0.01
     # level is an engine mix scalar, not a softcut param, and reset() is the
     # DSP's; it is deliberately left alone.
     assert v.level == pytest.approx(0.25)
+
+
+# --- Voice: read-backs report DSP state -------------------------------------
+# softcut-lib changes rec, rec_once and fade_time itself; the mirrors miss it.
+
+
+def _rec_once_voice(loop: float = 0.25) -> Voice:
+    v, _ = make_voice()
+    v.loop_start, v.loop_end = 0.0, loop
+    v.rec_level, v.pre_level = 1.0, 0.0
+    v.play = True
+    v.rec_once = True
+    v.rec = True
+    v.cut_to(0.0)
+    return v
+
+
+def test_rec_once_reads_true_until_its_pass_completes():
+    v = _rec_once_voice()
+    v.process(np.full(int(0.1 * SR), 0.5, dtype=np.float32))
+    assert v.rec_once is True
+    assert v.rec is True
+
+
+def test_rec_once_clears_rec_and_rec_once_after_one_pass():
+    v = _rec_once_voice()
+    v.process(np.full(int(0.6 * SR), 0.5, dtype=np.float32))
+    assert v.rec_once is False
+    assert v.rec is False
+
+
+def test_rec_off_cancels_an_armed_rec_once():
+    v = _rec_once_voice()
+    v.process(np.full(int(0.1 * SR), 0.5, dtype=np.float32))
+    v.rec = False
+    assert v.rec_once is False
+
+
+def test_rec_once_read_backs_track_the_audio_thread():
+    """Live: a set reads back at once, and the pass's end is seen too."""
+    import time
+
+    eng = Engine(voices=1, sample_rate=SR, mode="playback", null_device=True)
+    v = eng[0]
+    eng.allocate(seconds=1.0)
+    v.configure(loop_region=(0, 0.1), rec_level=1.0, pre_level=0.0)
+    v.play = True
+    v.cut_to(0.0)
+    with eng:
+        v.rec_once = True
+        assert v.rec_once is True and v.rec is True  # queued, not yet applied
+        deadline = time.monotonic() + 2.0
+        while v.rec_once and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert v.rec_once is False
+        assert v.rec is False
+        v.rec = True
+        assert v.rec is True
+
+
+def _crossfade_seconds(v: Voice) -> float:
+    """Time for output to fall to silence after a cut from ones into zeros."""
+    n = 1 << 17
+    buf = np.zeros(n, dtype=np.float32)
+    buf[: n // 2] = 1.0
+    v.buffer = buf
+    v.loop_start, v.loop_end, v.loop = 0.0, n / SR, True
+    v.rate = 1.0
+    v.play = True
+    v.cut_to(0.1)
+    v.process(np.zeros(4800, dtype=np.float32))
+    v.cut_to(2.0)  # into the zero half
+    out = np.asarray(v.process(np.zeros(16384, dtype=np.float32)))
+    return int(np.argmax(out <= 0.001)) / SR
+
+
+def test_fade_time_reports_the_crossfade_a_new_voice_uses():
+    v = Voice(SR)
+    assert _crossfade_seconds(v) == pytest.approx(v.fade_time, rel=0.01)
+
+
+def test_fade_time_reports_the_crossfade_a_reset_voice_uses():
+    v = Voice(SR)
+    v.fade_time = 0.05
+    v.reset()
+    assert _crossfade_seconds(v) == pytest.approx(v.fade_time, rel=0.01)
+
+
+# --- Voice: quirks ----------------------------------------------------------
+# "upstream" matches softcut-lib (and norns) sample for sample; "fixed" corrects
+# its defects, as softcut-rs `Quirks::Fixed` does.
+
+
+def _recorded_gain(v: Voice) -> float:
+    """Buffer value per unit of DC input, recorded at unity rec level."""
+    buf = np.zeros(65536, dtype=np.float32)
+    v.buffer = buf
+    v.loop_start, v.loop_end, v.loop = 0.0, 65536 / SR, True
+    v.rec_level, v.pre_level = 1.0, 0.0
+    v.rec = v.play = True
+    v.cut_to(0.0)
+    v.process(np.full(int(0.3 * SR), 0.1, dtype=np.float32))
+    return float(buf[int(0.2 * SR)]) / 0.1  # past a 0.1 s record fade-in
+
+
+def test_quirks_default_to_upstream():
+    assert Voice(SR).quirks == "upstream"
+    assert all(v.quirks == "upstream" for v in Engine(voices=2, mode="playback"))
+
+
+def test_upstream_quirks_record_polarity_inverted():
+    # SoftClip's gain of 1.2 applies below its knee in both modes.
+    assert _recorded_gain(Voice(SR, quirks="upstream")) == pytest.approx(-1.2, rel=1e-3)
+
+
+def test_fixed_quirks_record_with_input_polarity():
+    assert _recorded_gain(Voice(SR, quirks="fixed")) == pytest.approx(1.2, rel=1e-3)
+
+
+def test_fixed_quirks_crossfade_a_new_voice_over_10ms():
+    v = Voice(SR, quirks="fixed")
+    assert v.fade_time == pytest.approx(0.01)
+    assert _crossfade_seconds(v) == pytest.approx(0.01, rel=0.01)
+
+
+def test_fixed_quirks_crossfade_a_reset_voice_over_10ms():
+    v = Voice(SR, quirks="fixed")
+    v.fade_time = 0.05
+    v.reset()
+    assert v.fade_time == pytest.approx(0.01)
+    assert _crossfade_seconds(v) == pytest.approx(0.01, rel=0.01)
+
+
+def test_reset_keeps_quirks():
+    v = Voice(SR, quirks="fixed")
+    v.reset()
+    assert v.quirks == "fixed"
+
+
+def test_quirks_are_read_only():
+    v = Voice(SR)
+    with pytest.raises(AttributeError):
+        v.quirks = "fixed"  # type: ignore[misc]
+
+
+def test_quirks_rejects_unknown_mode():
+    with pytest.raises(ValueError):
+        Voice(SR, quirks="bogus")
+    with pytest.raises(ValueError):
+        Engine(voices=1, mode="playback", quirks="bogus")
+
+
+def test_engine_passes_quirks_to_every_voice():
+    eng = Engine(voices=3, mode="playback", quirks="fixed")
+    assert all(v.quirks == "fixed" for v in eng)
 
 
 def test_dropped_commands_starts_at_zero_and_is_read_only():

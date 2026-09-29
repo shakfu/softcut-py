@@ -18,7 +18,7 @@ cmake --build build/softcut-osc
 ./build/softcut-osc/softcut-osc --null          # headless, no hardware (tests/CI)
 ```
 
-Options: `--listen-host/-port`, `--reply-host/-port`, `--voices`, `--sample-rate`, `--block-size`, `--buffer-frames`, `--crossfade-ms`, `--resample-on-read`, `--output-device`, `--input-device`, `--list-devices`, `--duplex`, `--null`, `--no-audio`. Run `--list-devices` to see device indices for `--output-device`/`--input-device` (default `-1` = system default).
+Options: `--listen-host/-port`, `--reply-host/-port`, `--voices`, `--sample-rate`, `--block-size`, `--buffer-frames`, `--crossfade-ms`, `--resample-on-read`, `--output-device`, `--input-device`, `--list-devices`, `--duplex`, `--null`, `--no-audio`, `--quirks upstream|fixed`. Run `--list-devices` to see device indices for `--output-device`/`--input-device` (default `-1` = system default).
 
 Headless smoke test (drives the binary over UDP; Python is only the client):
 

@@ -523,6 +523,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--voices", type=int, default=6)
     parser.add_argument("--sample-rate", type=float, default=48000.0)
     parser.add_argument(
+        "--quirks",
+        choices=["upstream", "fixed"],
+        default="upstream",
+        help="upstream: match softcut-lib and norns; fixed: correct its defects.",
+    )
+    parser.add_argument(
         "--no-audio",
         action="store_true",
         help="Do not open the audio device (offline: buffer ops only).",
@@ -535,7 +541,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         format="%(name)s: %(message)s",
     )
 
-    host = NornsSoftcut(sample_rate=args.sample_rate, voices=args.voices)
+    host = NornsSoftcut(
+        sample_rate=args.sample_rate, voices=args.voices, quirks=args.quirks
+    )
     server = SoftcutOSC(
         host,
         backend=args.backend,

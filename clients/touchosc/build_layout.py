@@ -74,7 +74,7 @@ VOICE_DEFAULTS: dict[str, float] = {
     "/set/param/cut/loop_start": 0.0,
     "/set/param/cut/loop_end": 0.0,
     "/set/param/cut/position": 0.0,
-    "/set/param/cut/fade_time": 0.01,
+    "/set/param/cut/fade_time": 0.1,
     "/set/param/cut/rate_slew_time": 0.001,
     "/set/param/cut/recpre_slew_time": 0.001,
     "/set/param/cut/rec_level": 0.0,

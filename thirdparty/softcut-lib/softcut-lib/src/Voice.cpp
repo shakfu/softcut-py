@@ -9,17 +9,18 @@
 
 using namespace softcut;
 
-Voice::Voice() :
+Voice::Voice(bool fix) :
 rateRamp(48000, 0.1),
 preRamp(48000, 0.1),
 recRamp(48000, 0.1)
 {
+    fixQuirks = fix;
     svfPreFcBase = 16000;
     reset();
 }
 
 void Voice::reset() {
-    fadeCurves.init();
+    fadeCurves.init(fixQuirks);
 
     svfPre.reset();
     svfPre.setLpMix(1.0);
@@ -65,6 +66,11 @@ void Voice::reset() {
     playFlag = false;
 
     sch.init(&fadeCurves);
+    // sch.init() sets 0.1 s, overriding the setFadeTime(0.01) above
+    if (fixQuirks) {
+        setFadeTime(0.01);
+    }
+    publishFlags();
 }
 
 void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
@@ -115,6 +121,7 @@ void Voice:: processBlockMono(const float *in, float *out, int numFrames) {
             sch.setRecOnceFlag(false);
         }
     }
+    publishFlags();
 }
 
 void Voice::setSampleRate(float hz) {
@@ -173,6 +180,7 @@ void Voice::setRecFlag(bool val) {
             sch.setRecOnceFlag(false);
 	}
     }
+    publishFlags();
 }
 
 void Voice::setPlayFlag(bool val) {
@@ -266,6 +274,7 @@ void Voice::setRecOnceFlag(bool val) {
     if (val) {
         setRecFlag(true);
     }
+    publishFlags();
 }
 
 void Voice::setBuffer(float *b, unsigned int nf) {
@@ -314,6 +323,19 @@ bool Voice::getPlayFlag() {
 
 bool Voice::getRecFlag() {
     return recFlag;
+}
+
+bool Voice::getSavedRecFlag() {
+    return savedRecFlag.load(std::memory_order_relaxed);
+}
+
+bool Voice::getSavedRecOnceFlag() {
+    return savedRecOnceFlag.load(std::memory_order_relaxed);
+}
+
+void Voice::publishFlags() {
+    savedRecFlag.store(recFlag, std::memory_order_relaxed);
+    savedRecOnceFlag.store(sch.getRecOnceActive(), std::memory_order_relaxed);
 }
 
 float Voice::getActivePosition() {

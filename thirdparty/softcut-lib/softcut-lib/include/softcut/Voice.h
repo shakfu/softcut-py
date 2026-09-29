@@ -16,7 +16,9 @@
 namespace softcut {
     class Voice {
     public:
-        Voice();
+        // fixQuirks corrects upstream defects: polarity-inverted recording,
+        // the 0.1 s fade time reset() leaves, and the raised pre-curve check.
+        explicit Voice(bool fixQuirks = false);
 
         void init(FadeCurves *fc);
 
@@ -95,6 +97,12 @@ namespace softcut {
 
         bool getRecFlag();
 
+        // rec and rec-once state, updated per block and on each flag change;
+        // use these from non-audio threads
+        bool getSavedRecFlag();
+
+        bool getSavedRecOnceFlag();
+
 	float getActivePosition();
 
 	// use this from non-audio threads
@@ -109,6 +117,8 @@ namespace softcut {
         void updatePreSvfFc();
 
         void updateQuantPhase();
+
+        void publishFlags();
 
     private:
         float *buf;
@@ -158,11 +168,14 @@ namespace softcut {
 	// and are updated once per block:
 	std::atomic<phase_t> rawPhase{0};
         std::atomic<phase_t> quantPhase{0};
+        std::atomic<bool> savedRecFlag{false};
+        std::atomic<bool> savedRecOnceFlag{false};
 
     private:
 
         bool playFlag;
         bool recFlag;
+        bool fixQuirks = false;
 
     };
 }

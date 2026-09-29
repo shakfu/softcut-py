@@ -389,3 +389,11 @@ def test_ops_do_not_reallocate(sc):
     sc.buffer_clear_region(0.0, sec(2))
     assert sc.buffers[1] is before
     assert sc.engine[0].buffer is before
+
+
+def test_quirks_reach_every_voice_and_survive_reset():
+    sc = norns.NornsSoftcut(
+        voices=2, buffer_frames=4096, mode="playback", quirks="fixed"
+    )
+    sc.reset()
+    assert [v.quirks for v in sc.engine] == ["fixed", "fixed"]
